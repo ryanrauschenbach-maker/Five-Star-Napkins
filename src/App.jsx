@@ -8,6 +8,9 @@ import {
   RefreshCw,
   Search,
   Warehouse,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -22,7 +25,7 @@ import {
 } from "recharts";
 
 const SHEET_ID = "1KA0mswUxULOvwUdyfnd67k1dKbCUh1-9USOL2cDJC9A";
-const LOGO_URL = "/logo.png"; // Put your client logo in /public/logo.png
+const LOGO_URL = "/logo.png";
 
 const TAB_NAMES = {
   campaigns: "Sponsored Products Campaigns",
@@ -143,6 +146,107 @@ function AsinImage({ src, title }) {
   );
 }
 
+function sortRows(rows, sortConfig) {
+  if (!sortConfig?.key) return rows;
+  const { key, direction, type = "text", accessor } = sortConfig;
+  const dir = direction === "desc" ? -1 : 1;
+
+  return [...rows].sort((a, b) => {
+    const av = accessor ? accessor(a) : a[key];
+    const bv = accessor ? accessor(b) : b[key];
+
+    if (type === "number") {
+      return (normalizeNumber(av) - normalizeNumber(bv)) * dir;
+    }
+
+    return String(av ?? "").localeCompare(String(bv ?? ""), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }) * dir;
+  });
+}
+
+function SortableHeader({ column, sortConfig, onSort }) {
+  const active = sortConfig?.key === column.key;
+  const icon = !active ? (
+    <ChevronsUpDown className="h-3.5 w-3.5" />
+  ) : sortConfig.direction === "asc" ? (
+    <ChevronUp className="h-3.5 w-3.5" />
+  ) : (
+    <ChevronDown className="h-3.5 w-3.5" />
+  );
+
+  if (column.sortable === false) {
+    return <span>{column.label}</span>;
+  }
+
+  return (
+    <button
+      onClick={() => onSort(column)}
+      className={cn(
+        "inline-flex items-center gap-1 transition",
+        active ? "text-cyan-300" : "text-slate-300 hover:text-white"
+      )}
+    >
+      <span>{column.label}</span>
+      {icon}
+    </button>
+  );
+}
+
+function SortableTable({ columns, rows, rowKey, sortConfig, onSort }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-left text-sm">
+        <thead>
+          <tr className="border-b border-slate-800 text-slate-400">
+            {columns.map((col) => (
+              <th key={col.key} className="px-4 py-3 font-medium whitespace-nowrap">
+                <SortableHeader column={col} sortConfig={sortConfig} onSort={onSort} />
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, idx) => (
+            <tr key={rowKey ? row[rowKey] || idx : idx} className="border-b border-slate-900 text-slate-200">
+              {columns.map((col) => (
+                <td key={col.key} className="px-4 py-4 align-middle">
+                  {col.render ? col.render(row) : row[col.key]}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function useSortableRows(rows, defaultConfig) {
+  const [sortConfig, setSortConfig] = useState(defaultConfig || null);
+
+  const sortedRows = useMemo(() => sortRows(rows, sortConfig), [rows, sortConfig]);
+
+  function handleSort(column) {
+    const type = column.type || "text";
+    const accessor = column.sortAccessor;
+    setSortConfig((current) => {
+      if (current?.key === column.key) {
+        return {
+          key: column.key,
+          type,
+          accessor,
+          direction: current.direction === "asc" ? "desc" : "asc",
+        };
+      }
+      return { key: column.key, type, accessor, direction: type === "text" ? "asc" : "desc" };
+    });
+  }
+
+  return { sortedRows, sortConfig, handleSort };
+}
+
 function SidebarButton({ active, icon: Icon, label, onClick }) {
   return (
     <button
@@ -207,38 +311,6 @@ function SectionCard({ title, subtitle, children, right }) {
   );
 }
 
-function Table({ columns, rows, rowKey }) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full text-left text-sm">
-        <thead>
-          <tr className="border-b border-slate-800 text-slate-400">
-            {columns.map((col) => (
-              <th key={col.key} className="px-4 py-3 font-medium">
-                {col.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, idx) => (
-            <tr
-              key={rowKey ? row[rowKey] || idx : idx}
-              className="border-b border-slate-900 text-slate-200"
-            >
-              {columns.map((col) => (
-                <td key={col.key} className="px-4 py-4 align-middle">
-                  {col.render ? col.render(row) : row[col.key]}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 function TogglePills({ value, onChange, options }) {
   return (
     <div className="flex flex-wrap gap-2">
@@ -260,7 +332,7 @@ function TogglePills({ value, onChange, options }) {
   );
 }
 
-function App() {
+export default function App() {
   const [activeTab, setActiveTab] = useState("overview");
   const [adView, setAdView] = useState("Campaign");
   const [query, setQuery] = useState("");
@@ -292,68 +364,46 @@ function App() {
         setInventoryAwdSheet(awd);
         setError("");
       } catch (err) {
-        setError(
-          "Could not load Google Sheets data. Make sure the sheet is shared to 'Anyone with the link can view' and the tab names match exactly."
-        );
+        setError("Could not load Google Sheets data. Make sure the sheet is shared to 'Anyone with the link can view' and the tab names match exactly.");
       } finally {
         setLoading(false);
       }
     }
-
     load();
   }, []);
 
   const referenceByAsin = useMemo(() => {
     const map = new Map();
-
     referenceSheet.forEach((row) => {
       const asin = normalizeText(pick(row, ["asin", "ASIN"])).toUpperCase();
       if (!asin) return;
-
       map.set(asin, {
         asin,
         sku: normalizeText(pick(row, ["sku", "SKU"])),
-        parentAsin: normalizeText(
-          pick(row, ["parent asin", "Parent ASIN", "parent_asin"], "")
-        ),
+        parentAsin: normalizeText(pick(row, ["parent asin", "Parent ASIN", "parent_asin"], "")),
         title: normalizeText(pick(row, ["Title", "title"], "")),
-        shortTitle: normalizeText(
-          pick(row, ["short title", "Short Title", "short_title"], "")
-        ),
+        shortTitle: normalizeText(pick(row, ["short title", "Short Title", "short_title"], "")),
         imageUrl: inferImageUrl(row),
         brand: normalizeText(pick(row, ["brand", "Brand"], "")),
         type: normalizeText(pick(row, ["type", "Type", "item type", "Item Type"], "")),
       });
     });
-
     return map;
   }, [referenceSheet]);
 
   const cleanCampaignRows = useMemo(() => {
     return campaignSheet
-      .filter((row) => {
-        const entity = normalizeText(pick(row, ["Entity", "entity"])).toLowerCase();
-        return entity === "campaign";
-      })
+      .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
       .map((row) => {
-        const spend = normalizeNumber(
-          pick(row, ["Spend", "Spend(USD)", "Spend USD", "Cost"])
-        );
-        const sales = normalizeNumber(
-          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 7 Day Total Sales"])
-        );
+        const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Spend USD", "Cost"]));
+        const sales = normalizeNumber(pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 7 Day Total Sales"]));
         const clicks = normalizeNumber(pick(row, ["Clicks", "clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions", "impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders", "orders"]));
-
         return {
-          campaignName: normalizeText(
-            pick(row, ["Campaign Name", "campaign_name", "Campaign"])
-          ),
+          campaignName: normalizeText(pick(row, ["Campaign Name", "campaign_name", "Campaign"])),
           state: normalizeText(pick(row, ["State", "state", "Status"], "—")),
-          campaignType: normalizeText(
-            pick(row, ["Campaign Type", "campaign type", "Ad Type"], "SP")
-          ),
+          campaignType: normalizeText(pick(row, ["Campaign Type", "campaign type", "Ad Type"], "SP")),
           impressions,
           clicks,
           spend,
@@ -364,38 +414,22 @@ function App() {
           ctr: impressions ? (clicks / impressions) * 100 : 0,
         };
       })
-      .filter((row) =>
-        !query ||
-        `${row.campaignName} ${row.state} ${row.campaignType}`
-          .toLowerCase()
-          .includes(query.toLowerCase())
-      )
-      .sort((a, b) => b.spend - a.spend);
+      .filter((row) => !query || `${row.campaignName} ${row.state} ${row.campaignType}`.toLowerCase().includes(query.toLowerCase()));
   }, [campaignSheet, query]);
 
   const cleanProductRows = useMemo(() => {
     return productSheet
       .map((row) => {
-        const productField = normalizeText(
-          pick(row, ["Products", "Product", "products"], "")
-        );
+        const productField = normalizeText(pick(row, ["Products", "Product", "products"], ""));
         const asin = extractAsin(productField);
         const ref = referenceByAsin.get(asin) || {};
-
         const spend = normalizeNumber(pick(row, ["Spend(USD)", "Spend", "Cost"]));
-        const sales = normalizeNumber(
-          pick(row, ["Sales(USD)", "Sales", "Attributed Sales"])
-        );
+        const sales = normalizeNumber(pick(row, ["Sales(USD)", "Sales", "Attributed Sales"]));
         const clicks = normalizeNumber(pick(row, ["Clicks", "clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions", "impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders", "orders"]));
-        const ctr =
-          normalizeNumber(pick(row, ["CTR", "Ctr"])) || (impressions ? (clicks / impressions) * 100 : 0);
-        const cvr =
-          normalizeNumber(
-            pick(row, ["Conversion rate", "Conversion Rate", "CVR", "cvr"])
-          ) || (clicks ? (orders / clicks) * 100 : 0);
-
+        const ctr = normalizeNumber(pick(row, ["CTR", "Ctr"])) || (impressions ? (clicks / impressions) * 100 : 0);
+        const cvr = normalizeNumber(pick(row, ["Conversion rate", "Conversion Rate", "CVR", "cvr"])) || (clicks ? (orders / clicks) * 100 : 0);
         return {
           asin,
           parentAsin: ref.parentAsin || "",
@@ -416,20 +450,13 @@ function App() {
         };
       })
       .filter((row) => row.asin)
-      .filter((row) =>
-        !query ||
-        `${row.asin} ${row.parentAsin} ${row.shortTitle} ${row.itemType} ${row.brand}`
-          .toLowerCase()
-          .includes(query.toLowerCase())
-      );
+      .filter((row) => !query || `${row.asin} ${row.parentAsin} ${row.shortTitle} ${row.itemType} ${row.brand}`.toLowerCase().includes(query.toLowerCase()));
   }, [productSheet, referenceByAsin, query]);
 
   const productGrouped = useMemo(() => {
     const map = new Map();
-
     cleanProductRows.forEach((row) => {
-      const key = row.asin;
-      const current = map.get(key) || {
+      const current = map.get(row.asin) || {
         asin: row.asin,
         parentAsin: row.parentAsin,
         itemType: row.itemType,
@@ -442,36 +469,28 @@ function App() {
         sales: 0,
         orders: 0,
       };
-
       current.impressions += row.impressions;
       current.clicks += row.clicks;
       current.spend += row.spend;
       current.sales += row.sales;
       current.orders += row.orders;
-
-      map.set(key, current);
+      map.set(row.asin, current);
     });
-
-    return [...map.values()]
-      .map((row) => ({
-        ...row,
-        acos: row.sales ? (row.spend / row.sales) * 100 : 0,
-        roas: row.spend ? row.sales / row.spend : 0,
-        ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
-        cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0,
-      }))
-      .sort((a, b) => b.spend - a.spend);
+    return [...map.values()].map((row) => ({
+      ...row,
+      acos: row.sales ? (row.spend / row.sales) * 100 : 0,
+      roas: row.spend ? row.sales / row.spend : 0,
+      ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
+      cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0,
+    }));
   }, [cleanProductRows]);
 
   const parentGrouped = useMemo(() => {
     const map = new Map();
-
     cleanProductRows.forEach((row) => {
       const key = row.parentAsin || "Unmapped";
       const current = map.get(key) || {
         parentAsin: key,
-        shortTitle: key === "Unmapped" ? "Unmapped Parent" : key,
-        itemType: "",
         imageUrl: row.imageUrl,
         impressions: 0,
         clicks: 0,
@@ -479,59 +498,41 @@ function App() {
         sales: 0,
         orders: 0,
       };
-
       current.impressions += row.impressions;
       current.clicks += row.clicks;
       current.spend += row.spend;
       current.sales += row.sales;
       current.orders += row.orders;
-
       map.set(key, current);
     });
-
-    return [...map.values()]
-      .map((row) => ({
-        ...row,
-        acos: row.sales ? (row.spend / row.sales) * 100 : 0,
-        roas: row.spend ? row.sales / row.spend : 0,
-        ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
-        cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0,
-      }))
-      .sort((a, b) => b.spend - a.spend);
+    return [...map.values()].map((row) => ({
+      ...row,
+      acos: row.sales ? (row.spend / row.sales) * 100 : 0,
+      roas: row.spend ? row.sales / row.spend : 0,
+      ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
+      cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0,
+    }));
   }, [cleanProductRows]);
 
   const itemTypeGrouped = useMemo(() => {
     const map = new Map();
-
     cleanProductRows.forEach((row) => {
       const key = row.itemType || "Unmapped";
-      const current = map.get(key) || {
-        itemType: key,
-        impressions: 0,
-        clicks: 0,
-        spend: 0,
-        sales: 0,
-        orders: 0,
-      };
-
+      const current = map.get(key) || { itemType: key, impressions: 0, clicks: 0, spend: 0, sales: 0, orders: 0 };
       current.impressions += row.impressions;
       current.clicks += row.clicks;
       current.spend += row.spend;
       current.sales += row.sales;
       current.orders += row.orders;
-
       map.set(key, current);
     });
-
-    return [...map.values()]
-      .map((row) => ({
-        ...row,
-        acos: row.sales ? (row.spend / row.sales) * 100 : 0,
-        roas: row.spend ? row.sales / row.spend : 0,
-        ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
-        cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0,
-      }))
-      .sort((a, b) => b.spend - a.spend);
+    return [...map.values()].map((row) => ({
+      ...row,
+      acos: row.sales ? (row.spend / row.sales) * 100 : 0,
+      roas: row.spend ? row.sales / row.spend : 0,
+      ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
+      cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0,
+    }));
   }, [cleanProductRows]);
 
   const adSummary = useMemo(() => {
@@ -539,56 +540,129 @@ function App() {
     const sales = cleanProductRows.reduce((sum, row) => sum + row.sales, 0);
     const clicks = cleanProductRows.reduce((sum, row) => sum + row.clicks, 0);
     const impressions = cleanProductRows.reduce((sum, row) => sum + row.impressions, 0);
-
-    return {
-      spend,
-      sales,
-      acos: sales ? (spend / sales) * 100 : 0,
-      roas: spend ? sales / spend : 0,
-      clicks,
-      impressions,
-    };
+    return { spend, sales, acos: sales ? (spend / sales) * 100 : 0, roas: spend ? sales / spend : 0, clicks, impressions };
   }, [cleanProductRows]);
 
   const adTrend = useMemo(() => {
-    const top = productGrouped.slice(0, 10);
-    return top.map((row) => ({
-      name:
-        row.shortTitle.length > 22 ? `${row.shortTitle.slice(0, 22)}…` : row.shortTitle,
-      spend: row.spend,
-      sales: row.sales,
-    }));
+    const top = [...productGrouped].sort((a, b) => b.sales - a.sales).slice(0, 10);
+    return top.map((row) => ({ name: row.shortTitle.length > 22 ? `${row.shortTitle.slice(0, 22)}…` : row.shortTitle, spend: row.spend, sales: row.sales }));
   }, [productGrouped]);
 
-  const inventorySummary = useMemo(() => {
-    const sumRows = (rows, fields) =>
-      rows.reduce((sum, row) => {
-        fields.forEach((field) => {
-          sum[field] += normalizeNumber(row[field]);
-        });
-        return sum;
-      }, Object.fromEntries(fields.map((f) => [f, 0])));
+  const inventorySummary = useMemo(() => ({
+    fbaRows: inventoryFbaSheet.length,
+    awdRows: inventoryAwdSheet.length,
+  }), [inventoryFbaSheet, inventoryAwdSheet]);
 
-    const fba = sumRows(inventoryFbaSheet, Object.keys(inventoryFbaSheet[0] || {}));
-    const awd = sumRows(inventoryAwdSheet, Object.keys(inventoryAwdSheet[0] || {}));
-
-    const fbaUnits = Object.values(fba).reduce((a, b) => a + normalizeNumber(b), 0);
-    const awdUnits = Object.values(awd).reduce((a, b) => a + normalizeNumber(b), 0);
-
-    return {
-      fbaUnits,
-      awdUnits,
-      fbaRows: inventoryFbaSheet.length,
-      awdRows: inventoryAwdSheet.length,
-    };
-  }, [inventoryFbaSheet, inventoryAwdSheet]);
-
-  const overviewCards = [
-    { label: "Ad Spend (60D)", value: adSummary.spend, icon: Megaphone },
-    { label: "Ad Sales (60D)", value: adSummary.sales, icon: DollarSign },
-    { label: "ACOS", value: adSummary.acos, suffix: "%", icon: BarChart3 },
-    { label: "ROAS", value: adSummary.roas, suffix: "x", icon: RefreshCw },
+  const campaignColumns = [
+    { key: "campaignName", label: "Campaign", type: "text" },
+    { key: "state", label: "Status", type: "text" },
+    { key: "campaignType", label: "Type", type: "text" },
+    { key: "impressions", label: "Impr.", type: "number", render: (r) => compactNumber(r.impressions) },
+    { key: "clicks", label: "Clicks", type: "number", render: (r) => compactNumber(r.clicks) },
+    { key: "spend", label: "Spend", type: "number", render: (r) => currency(r.spend) },
+    { key: "sales", label: "Sales", type: "number", render: (r) => currency(r.sales) },
+    { key: "orders", label: "Orders", type: "number", render: (r) => numberFmt(r.orders) },
+    { key: "ctr", label: "CTR", type: "number", render: (r) => pct(r.ctr) },
+    { key: "acos", label: "ACOS", type: "number", render: (r) => pct(r.acos) },
+    { key: "roas", label: "ROAS", type: "number", render: (r) => `${r.roas.toFixed(2)}x` },
   ];
+
+  const productColumns = [
+    {
+      key: "asin",
+      label: "Product",
+      type: "text",
+      sortAccessor: (r) => `${r.asin} ${r.shortTitle}`,
+      render: (r) => (
+        <div className="flex items-center gap-3">
+          <AsinImage src={r.imageUrl} title={r.shortTitle} />
+          <div>
+            <div className="font-medium text-cyan-300">{r.asin}</div>
+            <div className="text-xs text-slate-400">{r.shortTitle}</div>
+          </div>
+        </div>
+      ),
+    },
+    { key: "parentAsin", label: "Parent", type: "text" },
+    { key: "itemType", label: "Item Type", type: "text" },
+    { key: "brand", label: "Brand", type: "text" },
+    { key: "impressions", label: "Impr.", type: "number", render: (r) => compactNumber(r.impressions) },
+    { key: "clicks", label: "Clicks", type: "number", render: (r) => compactNumber(r.clicks) },
+    { key: "spend", label: "Spend", type: "number", render: (r) => currency(r.spend) },
+    { key: "sales", label: "Sales", type: "number", render: (r) => currency(r.sales) },
+    { key: "orders", label: "Orders", type: "number", render: (r) => numberFmt(r.orders) },
+    { key: "ctr", label: "CTR", type: "number", render: (r) => pct(r.ctr) },
+    { key: "cvr", label: "CVR", type: "number", render: (r) => pct(r.cvr) },
+    { key: "acos", label: "ACOS", type: "number", render: (r) => pct(r.acos) },
+    { key: "roas", label: "ROAS", type: "number", render: (r) => `${r.roas.toFixed(2)}x` },
+  ];
+
+  const parentColumns = [
+    {
+      key: "parentAsin",
+      label: "Parent ASIN",
+      type: "text",
+      render: (r) => (
+        <div className="flex items-center gap-3">
+          <AsinImage src={r.imageUrl} title={r.parentAsin} />
+          <div className="font-medium text-cyan-300">{r.parentAsin}</div>
+        </div>
+      ),
+    },
+    { key: "impressions", label: "Impr.", type: "number", render: (r) => compactNumber(r.impressions) },
+    { key: "clicks", label: "Clicks", type: "number", render: (r) => compactNumber(r.clicks) },
+    { key: "spend", label: "Spend", type: "number", render: (r) => currency(r.spend) },
+    { key: "sales", label: "Sales", type: "number", render: (r) => currency(r.sales) },
+    { key: "orders", label: "Orders", type: "number", render: (r) => numberFmt(r.orders) },
+    { key: "ctr", label: "CTR", type: "number", render: (r) => pct(r.ctr) },
+    { key: "cvr", label: "CVR", type: "number", render: (r) => pct(r.cvr) },
+    { key: "acos", label: "ACOS", type: "number", render: (r) => pct(r.acos) },
+    { key: "roas", label: "ROAS", type: "number", render: (r) => `${r.roas.toFixed(2)}x` },
+  ];
+
+  const itemTypeColumns = [
+    { key: "itemType", label: "Item Type", type: "text" },
+    { key: "impressions", label: "Impr.", type: "number", render: (r) => compactNumber(r.impressions) },
+    { key: "clicks", label: "Clicks", type: "number", render: (r) => compactNumber(r.clicks) },
+    { key: "spend", label: "Spend", type: "number", render: (r) => currency(r.spend) },
+    { key: "sales", label: "Sales", type: "number", render: (r) => currency(r.sales) },
+    { key: "orders", label: "Orders", type: "number", render: (r) => numberFmt(r.orders) },
+    { key: "ctr", label: "CTR", type: "number", render: (r) => pct(r.ctr) },
+    { key: "cvr", label: "CVR", type: "number", render: (r) => pct(r.cvr) },
+    { key: "acos", label: "ACOS", type: "number", render: (r) => pct(r.acos) },
+    { key: "roas", label: "ROAS", type: "number", render: (r) => `${r.roas.toFixed(2)}x` },
+  ];
+
+  const catalogColumns = [
+    {
+      key: "asin",
+      label: "Product",
+      type: "text",
+      sortAccessor: (r) => `${r.asin} ${r.shortTitle}`,
+      render: (r) => (
+        <div className="flex items-center gap-3">
+          <AsinImage src={r.imageUrl} title={r.shortTitle} />
+          <div>
+            <div className="font-medium text-cyan-300">{r.asin}</div>
+            <div className="text-xs text-slate-400">{r.shortTitle}</div>
+          </div>
+        </div>
+      ),
+    },
+    { key: "parentAsin", label: "Parent", type: "text" },
+    { key: "itemType", label: "Item Type", type: "text" },
+    { key: "brand", label: "Brand", type: "text" },
+    { key: "spend", label: "Ad Spend", type: "number", render: (r) => currency(r.spend) },
+    { key: "sales", label: "Ad Sales", type: "number", render: (r) => currency(r.sales) },
+    { key: "acos", label: "ACOS", type: "number", render: (r) => pct(r.acos) },
+    { key: "roas", label: "ROAS", type: "number", render: (r) => `${r.roas.toFixed(2)}x` },
+  ];
+
+  const campaignSort = useSortableRows(cleanCampaignRows, { key: "spend", type: "number", direction: "desc" });
+  const productSort = useSortableRows(productGrouped, { key: "spend", type: "number", direction: "desc" });
+  const parentSort = useSortableRows(parentGrouped, { key: "spend", type: "number", direction: "desc" });
+  const itemTypeSort = useSortableRows(itemTypeGrouped, { key: "spend", type: "number", direction: "desc" });
+  const catalogSort = useSortableRows(productGrouped.slice(0, 500), { key: "sales", type: "number", direction: "desc" });
 
   const tabs = [
     { id: "overview", label: "Overview", icon: DollarSign },
@@ -597,13 +671,7 @@ function App() {
     { id: "catalog", label: "Catalog", icon: Package },
   ];
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
-        Loading Google Sheets data...
-      </div>
-    );
-  }
+  if (loading) return <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">Loading Google Sheets data...</div>;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -623,31 +691,16 @@ function App() {
 
           <div className="mt-6 space-y-2">
             {tabs.map((tab) => (
-              <SidebarButton
-                key={tab.id}
-                active={activeTab === tab.id}
-                icon={tab.icon}
-                label={tab.label}
-                onClick={() => setActiveTab(tab.id)}
-              />
+              <SidebarButton key={tab.id} active={activeTab === tab.id} icon={tab.icon} label={tab.label} onClick={() => setActiveTab(tab.id)} />
             ))}
-          </div>
-
-          <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-950 p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Source</p>
-            <p className="mt-3 text-sm leading-6 text-slate-300 break-all">{SHEET_ID}</p>
           </div>
         </aside>
 
         <main className="p-4 md:p-6 xl:p-8">
           <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-white">
-                Five Star Napkins Dashboard
-              </h1>
-              <p className="mt-2 text-sm text-slate-400">
-                Seller Central only. Live from Google Sheets.
-              </p>
+              <h1 className="text-3xl font-semibold tracking-tight text-white">Five Star Napkins Dashboard</h1>
+              <p className="mt-2 text-sm text-slate-400">Seller Central only. Live from Google Sheets.</p>
             </div>
 
             <div className="flex flex-col gap-3 md:flex-row md:items-center">
@@ -661,34 +714,21 @@ function App() {
                 />
               </div>
 
-              <button
-                onClick={() => window.location.reload()}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-slate-800"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Refresh
+              <button onClick={() => window.location.reload()} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-slate-800">
+                <RefreshCw className="h-4 w-4" /> Refresh
               </button>
             </div>
           </div>
 
-          {error ? (
-            <div className="mb-6 rounded-2xl border border-rose-900 bg-rose-950/40 p-4 text-sm text-rose-200">
-              {error}
-            </div>
-          ) : null}
+          {error ? <div className="mb-6 rounded-2xl border border-rose-900 bg-rose-950/40 p-4 text-sm text-rose-200">{error}</div> : null}
 
           {activeTab === "overview" && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-                {overviewCards.map((item) => (
-                  <StatCard
-                    key={item.label}
-                    label={item.label}
-                    value={item.value}
-                    suffix={item.suffix}
-                    icon={item.icon}
-                  />
-                ))}
+                <StatCard label="Ad Spend (60D)" value={adSummary.spend} icon={Megaphone} />
+                <StatCard label="Ad Sales (60D)" value={adSummary.sales} icon={DollarSign} />
+                <StatCard label="ACOS" value={adSummary.acos} suffix="%" icon={BarChart3} />
+                <StatCard label="ROAS" value={adSummary.roas} suffix="x" icon={RefreshCw} />
               </div>
 
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
@@ -699,20 +739,15 @@ function App() {
                         <CartesianGrid stroke="#172033" vertical={false} />
                         <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
                         <YAxis stroke="#64748b" fontSize={12} tickFormatter={(v) => `$${compactNumber(v)}`} tickLine={false} axisLine={false} />
-                        <Tooltip
-                          contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: 16 }}
-                          formatter={(v) => currency(v)}
-                        />
+                        <Tooltip contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: 16 }} formatter={(v) => currency(v)} />
                         <Bar dataKey="sales" radius={[8, 8, 0, 0]} fill="#38bdf8" />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
                 </SectionCard>
 
-                <SectionCard title="Inventory Snapshot" subtitle="FBA and AWD row counts and totals">
+                <SectionCard title="Inventory Snapshot" subtitle="FBA and AWD row counts">
                   <div className="grid grid-cols-2 gap-4">
-                    <CountCard label="FBA Units (approx)" value={inventorySummary.fbaUnits} />
-                    <CountCard label="AWD Units (approx)" value={inventorySummary.awdUnits} />
                     <CountCard label="FBA Rows" value={inventorySummary.fbaRows} />
                     <CountCard label="AWD Rows" value={inventorySummary.awdRows} />
                   </div>
@@ -730,107 +765,11 @@ function App() {
                 <StatCard label="ROAS" value={adSummary.roas} suffix="x" icon={RefreshCw} />
               </div>
 
-              <SectionCard
-                title="Advertising Performance"
-                subtitle="Toggle between campaign, product, parent, and item type views"
-                right={
-                  <TogglePills
-                    value={adView}
-                    onChange={setAdView}
-                    options={["Campaign", "Product", "Parent", "Item Type"]}
-                  />
-                }
-              >
-                {adView === "Campaign" && (
-                  <Table
-                    rowKey="campaignName"
-                    columns={[
-                      { key: "campaignName", label: "Campaign" },
-                      { key: "state", label: "Status" },
-                      { key: "campaignType", label: "Type" },
-                      { key: "impressions", label: "Impr.", render: (r) => compactNumber(r.impressions) },
-                      { key: "clicks", label: "Clicks", render: (r) => compactNumber(r.clicks) },
-                      { key: "spend", label: "Spend", render: (r) => currency(r.spend) },
-                      { key: "sales", label: "Sales", render: (r) => currency(r.sales) },
-                      { key: "acos", label: "ACOS", render: (r) => pct(r.acos) },
-                      { key: "roas", label: "ROAS", render: (r) => `${r.roas.toFixed(2)}x` },
-                    ]}
-                    rows={cleanCampaignRows}
-                  />
-                )}
-
-                {adView === "Product" && (
-                  <Table
-                    rowKey="asin"
-                    columns={[
-                      {
-                        key: "asin",
-                        label: "Product",
-                        render: (r) => (
-                          <div className="flex items-center gap-3">
-                            <AsinImage src={r.imageUrl} title={r.shortTitle} />
-                            <div>
-                              <div className="font-medium text-cyan-300">{r.asin}</div>
-                              <div className="text-xs text-slate-400">{r.shortTitle}</div>
-                            </div>
-                          </div>
-                        ),
-                      },
-                      { key: "itemType", label: "Item Type" },
-                      { key: "impressions", label: "Impr.", render: (r) => compactNumber(r.impressions) },
-                      { key: "clicks", label: "Clicks", render: (r) => compactNumber(r.clicks) },
-                      { key: "spend", label: "Spend", render: (r) => currency(r.spend) },
-                      { key: "sales", label: "Sales", render: (r) => currency(r.sales) },
-                      { key: "orders", label: "Orders", render: (r) => numberFmt(r.orders) },
-                      { key: "acos", label: "ACOS", render: (r) => pct(r.acos) },
-                      { key: "roas", label: "ROAS", render: (r) => `${r.roas.toFixed(2)}x` },
-                    ]}
-                    rows={productGrouped}
-                  />
-                )}
-
-                {adView === "Parent" && (
-                  <Table
-                    rowKey="parentAsin"
-                    columns={[
-                      {
-                        key: "parentAsin",
-                        label: "Parent ASIN",
-                        render: (r) => (
-                          <div className="flex items-center gap-3">
-                            <AsinImage src={r.imageUrl} title={r.parentAsin} />
-                            <div className="font-medium text-cyan-300">{r.parentAsin}</div>
-                          </div>
-                        ),
-                      },
-                      { key: "impressions", label: "Impr.", render: (r) => compactNumber(r.impressions) },
-                      { key: "clicks", label: "Clicks", render: (r) => compactNumber(r.clicks) },
-                      { key: "spend", label: "Spend", render: (r) => currency(r.spend) },
-                      { key: "sales", label: "Sales", render: (r) => currency(r.sales) },
-                      { key: "orders", label: "Orders", render: (r) => numberFmt(r.orders) },
-                      { key: "acos", label: "ACOS", render: (r) => pct(r.acos) },
-                      { key: "roas", label: "ROAS", render: (r) => `${r.roas.toFixed(2)}x` },
-                    ]}
-                    rows={parentGrouped}
-                  />
-                )}
-
-                {adView === "Item Type" && (
-                  <Table
-                    rowKey="itemType"
-                    columns={[
-                      { key: "itemType", label: "Item Type" },
-                      { key: "impressions", label: "Impr.", render: (r) => compactNumber(r.impressions) },
-                      { key: "clicks", label: "Clicks", render: (r) => compactNumber(r.clicks) },
-                      { key: "spend", label: "Spend", render: (r) => currency(r.spend) },
-                      { key: "sales", label: "Sales", render: (r) => currency(r.sales) },
-                      { key: "orders", label: "Orders", render: (r) => numberFmt(r.orders) },
-                      { key: "acos", label: "ACOS", render: (r) => pct(r.acos) },
-                      { key: "roas", label: "ROAS", render: (r) => `${r.roas.toFixed(2)}x` },
-                    ]}
-                    rows={itemTypeGrouped}
-                  />
-                )}
+              <SectionCard title="Advertising Performance" subtitle="All Advertising and Catalog tables are now sortable" right={<TogglePills value={adView} onChange={setAdView} options={["Campaign", "Product", "Parent", "Item Type"]} />}>
+                {adView === "Campaign" && <SortableTable rowKey="campaignName" columns={campaignColumns} rows={campaignSort.sortedRows} sortConfig={campaignSort.sortConfig} onSort={campaignSort.handleSort} />}
+                {adView === "Product" && <SortableTable rowKey="asin" columns={productColumns} rows={productSort.sortedRows} sortConfig={productSort.sortConfig} onSort={productSort.handleSort} />}
+                {adView === "Parent" && <SortableTable rowKey="parentAsin" columns={parentColumns} rows={parentSort.sortedRows} sortConfig={parentSort.sortConfig} onSort={parentSort.handleSort} />}
+                {adView === "Item Type" && <SortableTable rowKey="itemType" columns={itemTypeColumns} rows={itemTypeSort.sortedRows} sortConfig={itemTypeSort.sortConfig} onSort={itemTypeSort.handleSort} />}
               </SectionCard>
             </div>
           )}
@@ -840,21 +779,7 @@ function App() {
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <CountCard label="FBA Rows" value={inventorySummary.fbaRows} />
                 <CountCard label="AWD Rows" value={inventorySummary.awdRows} />
-                <CountCard label="FBA Units (approx)" value={inventorySummary.fbaUnits} />
-                <CountCard label="AWD Units (approx)" value={inventorySummary.awdUnits} />
               </div>
-
-              <SectionCard title="FBA Inventory" subtitle="Raw sheet preview">
-                <pre className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/40 p-4 text-xs text-slate-300">
-                  {JSON.stringify(inventoryFbaSheet.slice(0, 10), null, 2)}
-                </pre>
-              </SectionCard>
-
-              <SectionCard title="AWD Inventory" subtitle="Raw sheet preview">
-                <pre className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/40 p-4 text-xs text-slate-300">
-                  {JSON.stringify(inventoryAwdSheet.slice(0, 10), null, 2)}
-                </pre>
-              </SectionCard>
             </div>
           )}
 
@@ -867,31 +792,8 @@ function App() {
                 <CountCard label="Item Types" value={itemTypeGrouped.length} />
               </div>
 
-              <SectionCard title="Catalog Preview" subtitle="Using short title from item_data_reference">
-                <Table
-                  rowKey="asin"
-                  columns={[
-                    {
-                      key: "asin",
-                      label: "Product",
-                      render: (r) => (
-                        <div className="flex items-center gap-3">
-                          <AsinImage src={r.imageUrl} title={r.shortTitle} />
-                          <div>
-                            <div className="font-medium text-cyan-300">{r.asin}</div>
-                            <div className="text-xs text-slate-400">{r.shortTitle}</div>
-                          </div>
-                        </div>
-                      ),
-                    },
-                    { key: "parentAsin", label: "Parent" },
-                    { key: "itemType", label: "Item Type" },
-                    { key: "brand", label: "Brand" },
-                    { key: "spend", label: "Ad Spend", render: (r) => currency(r.spend) },
-                    { key: "sales", label: "Ad Sales", render: (r) => currency(r.sales) },
-                  ]}
-                  rows={productGrouped.slice(0, 50)}
-                />
+              <SectionCard title="Catalog Preview" subtitle="Short title, parent, item type, and ad performance are sortable">
+                <SortableTable rowKey="asin" columns={catalogColumns} rows={catalogSort.sortedRows} sortConfig={catalogSort.sortConfig} onSort={catalogSort.handleSort} />
               </SectionCard>
             </div>
           )}
@@ -900,5 +802,3 @@ function App() {
     </div>
   );
 }
-
-export default App;
