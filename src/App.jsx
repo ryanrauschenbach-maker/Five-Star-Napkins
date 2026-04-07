@@ -1,13 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import {
   BarChart3,
+  Boxes,
   DollarSign,
   Megaphone,
   Package,
   RefreshCw,
   Search,
-  ShoppingCart,
   Warehouse,
 } from "lucide-react";
 import {
@@ -18,30 +17,26 @@ import {
   XAxis,
   YAxis,
   Tooltip,
+  BarChart,
+  Bar,
 } from "recharts";
 
-const SHEET_ID = "10Mt51wijvl-_LzJG7Z-uSLYrn4MRzeUEY9TSkinkGPY";
-const LOGO_URL = "https://designhqs.com/wp-content/uploads/2022/01/dh-logi.svg";
+const SHEET_ID = "1KA0mswUxULOvwUdyfnd67k1dKbCUh1-9USOL2cDJC9A";
+const LOGO_URL = "/logo.png"; // Put your client logo in /public/logo.png
 
-const currency = (value) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(Number(value || 0));
+const TAB_NAMES = {
+  campaigns: "Sponsored Products Campaigns",
+  productAds: "Products_Ad_Report",
+  itemRef: "item_data_reference",
+  inventoryFba: "inventory_fba",
+  inventoryAwd: "inventory_awd",
+};
 
-const numberFmt = (value) => new Intl.NumberFormat("en-US").format(Number(value || 0));
-const pct = (value) => `${Number(value || 0).toFixed(1)}%`;
-const weeks = (value) => `${Number(value || 0).toFixed(1)}w`;
-
-function compactCurrency(value) {
-  const n = Number(value || 0);
-  if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(n) >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return `${n}`;
+function cn(...classes) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function buildSheetUrl(tabName, query = "select *") {
+function getSheetUrl(tabName, query = "select *") {
   return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?sheet=${encodeURIComponent(
     tabName
   )}&headers=1&tq=${encodeURIComponent(query)}`;
@@ -61,11 +56,18 @@ function parseGviz(text) {
   });
 }
 
-async function fetchSheet(tabName, query = "select *") {
-  const res = await fetch(buildSheetUrl(tabName, query));
-  if (!res.ok) throw new Error(`Failed to load ${tabName}`);
+async function fetchSheet(tabName) {
+  const res = await fetch(getSheetUrl(tabName));
+  if (!res.ok) throw new Error(`Failed to load sheet tab: ${tabName}`);
   const text = await res.text();
   return parseGviz(text);
+}
+
+function pick(obj, keys, fallback = null) {
+  for (const key of keys) {
+    if (obj[key] !== undefined && obj[key] !== null && obj[key] !== "") return obj[key];
+  }
+  return fallback;
 }
 
 function normalizeNumber(value) {
@@ -74,27 +76,57 @@ function normalizeNumber(value) {
   return Number(String(value).replace(/[$,%\s,]/g, "")) || 0;
 }
 
-function cn(...classes) {
-  return classes.filter(Boolean).join(" ");
+function normalizeText(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
 }
 
-function getAsinImageUrl(asin) {
-  if (!asin) return "";
-  return `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`;
+function currency(value) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(Number(value || 0));
 }
 
-function AsinImage({ asin, title, size = "sm" }) {
+function numberFmt(value) {
+  return new Intl.NumberFormat("en-US").format(Number(value || 0));
+}
+
+function pct(value) {
+  return `${Number(value || 0).toFixed(1)}%`;
+}
+
+function compactNumber(value) {
+  const n = Number(value || 0);
+  if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return `${Math.round(n)}`;
+}
+
+function extractAsin(productField) {
+  const text = normalizeText(productField).toUpperCase();
+  const match = text.match(/^([A-Z0-9]{10})/);
+  return match ? match[1] : "";
+}
+
+function inferImageUrl(row) {
+  const explicit = normalizeText(
+    pick(row, ["image url", "Image URL", "image_url", "Image Url"], "")
+  );
+  if (explicit) return explicit;
+  const asin = normalizeText(pick(row, ["asin", "ASIN"], ""));
+  return asin
+    ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`
+    : "";
+}
+
+function AsinImage({ src, title }) {
   const [errored, setErrored] = useState(false);
-  const dimension = size === "sm" ? "h-10 w-10" : "h-14 w-14";
 
-  if (!asin || errored) {
+  if (!src || errored) {
     return (
-      <div
-        className={cn(
-          "flex shrink-0 items-center justify-center rounded-2xl border border-slate-800 bg-slate-900 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500",
-          dimension
-        )}
-      >
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-800 bg-slate-900 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
         N/A
       </div>
     );
@@ -102,9 +134,9 @@ function AsinImage({ asin, title, size = "sm" }) {
 
   return (
     <img
-      src={getAsinImageUrl(asin)}
-      alt={title || asin}
-      className={cn("shrink-0 rounded-2xl border border-slate-800 bg-white object-contain p-1", dimension)}
+      src={src}
+      alt={title || "Product"}
+      className="h-10 w-10 shrink-0 rounded-2xl border border-slate-800 bg-white object-contain p-1"
       onError={() => setErrored(true)}
       loading="lazy"
     />
@@ -128,24 +160,16 @@ function SidebarButton({ active, icon: Icon, label, onClick }) {
   );
 }
 
-function StatCard({ label, value, change, suffix, icon: Icon }) {
+function StatCard({ label, value, suffix, icon: Icon }) {
   const formatted =
     suffix === "%"
       ? pct(value)
       : suffix === "x"
       ? `${Number(value || 0).toFixed(2)}x`
-      : suffix === "units"
-      ? numberFmt(value)
       : currency(value);
 
-  const positive = Number(change || 0) >= 0;
-
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="rounded-3xl border border-slate-800 bg-slate-950 p-5 shadow-2xl shadow-black/20"
-    >
+    <div className="rounded-3xl border border-slate-800 bg-slate-950 p-5 shadow-2xl shadow-black/20">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</p>
@@ -155,317 +179,117 @@ function StatCard({ label, value, change, suffix, icon: Icon }) {
           <Icon className="h-5 w-5" />
         </div>
       </div>
-      <div
-        className={cn(
-          "inline-flex rounded-full px-2.5 py-1 text-xs font-medium",
-          positive ? "bg-emerald-500/10 text-emerald-300" : "bg-rose-500/10 text-rose-300"
-        )}
-      >
-        {positive ? "↑" : "↓"} {Math.abs(Number(change || 0)).toFixed(1)}%
-      </div>
-    </motion.div>
-  );
-}
-
-function InventoryCard({ label, value, kind }) {
-  return (
-    <div className="rounded-3xl border border-slate-800 bg-slate-950 p-5">
-      <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</p>
-      <p className="mt-3 text-3xl font-semibold text-white">
-        {kind === "weeks" ? weeks(value) : numberFmt(value)}
-      </p>
     </div>
   );
 }
 
-function SectionCard({ title, subtitle, children, className }) {
+function CountCard({ label, value }) {
   return (
-    <div className={cn("rounded-3xl border border-slate-800 bg-slate-950 p-5", className)}>
-      <div className="mb-5">
-        <h3 className="text-lg font-semibold text-white">{title}</h3>
-        {subtitle ? <p className="mt-1 text-sm text-slate-400">{subtitle}</p> : null}
+    <div className="rounded-3xl border border-slate-800 bg-slate-950 p-5">
+      <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</p>
+      <p className="mt-3 text-3xl font-semibold text-white">{numberFmt(value)}</p>
+    </div>
+  );
+}
+
+function SectionCard({ title, subtitle, children, right }) {
+  return (
+    <div className="rounded-3xl border border-slate-800 bg-slate-950 p-5">
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-lg font-semibold text-white">{title}</h3>
+          {subtitle ? <p className="mt-1 text-sm text-slate-400">{subtitle}</p> : null}
+        </div>
+        {right}
       </div>
       {children}
     </div>
   );
 }
 
-function MiniBarList({ data }) {
-  const max = Math.max(...data.map((d) => d.value), 1);
+function Table({ columns, rows, rowKey }) {
   return (
-    <div className="space-y-4">
-      {data.map((item) => (
-        <div key={item.name}>
-          <div className="mb-1 flex items-center justify-between gap-4 text-sm">
-            <span className="text-slate-300">{item.name}</span>
-            <span className="font-medium text-white">{currency(item.value)}</span>
-          </div>
-          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-900">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-400"
-              style={{ width: `${(item.value / max) * 100}%` }}
-            />
-          </div>
-        </div>
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-left text-sm">
+        <thead>
+          <tr className="border-b border-slate-800 text-slate-400">
+            {columns.map((col) => (
+              <th key={col.key} className="px-4 py-3 font-medium">
+                {col.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, idx) => (
+            <tr
+              key={rowKey ? row[rowKey] || idx : idx}
+              className="border-b border-slate-900 text-slate-200"
+            >
+              {columns.map((col) => (
+                <td key={col.key} className="px-4 py-4 align-middle">
+                  {col.render ? col.render(row) : row[col.key]}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TogglePills({ value, onChange, options }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map((option) => (
+        <button
+          key={option}
+          onClick={() => onChange(option)}
+          className={cn(
+            "rounded-full border px-3 py-1.5 text-xs transition",
+            value === option
+              ? "border-cyan-400 bg-cyan-400/10 text-cyan-300"
+              : "border-slate-800 bg-slate-900 text-slate-300 hover:bg-slate-800"
+          )}
+        >
+          {option}
+        </button>
       ))}
     </div>
   );
 }
 
-function SalesOverview({ data }) {
-  return (
-    <div className="space-y-6">
-      <SectionCard title="Daily Revenue Trend" subtitle="Pulled from the sales_daily sheet tab">
-        <div className="h-72 w-full">
-          <ResponsiveContainer>
-            <AreaChart data={data.dailyTrend}>
-              <defs>
-                <linearGradient id="salesRevenueFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="#38bdf8" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid stroke="#172033" vertical={false} />
-              <XAxis dataKey="date" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-              <YAxis stroke="#64748b" fontSize={12} tickFormatter={(v) => `$${compactCurrency(v)}`} tickLine={false} axisLine={false} />
-              <Tooltip contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: 16 }} formatter={(v) => currency(v)} />
-              <Area type="monotone" dataKey="revenue" stroke="#38bdf8" fill="url(#salesRevenueFill)" strokeWidth={2.5} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      </SectionCard>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {data.cards.map((item) => (
-          <StatCard key={item.label} {...item} />
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <SectionCard title="Revenue by Brand">
-          <MiniBarList data={data.byBrand} />
-        </SectionCard>
-        <SectionCard title="Revenue by Category">
-          <MiniBarList data={data.byCategory} />
-        </SectionCard>
-      </div>
-
-      <SectionCard title="Top Products" subtitle="From products_30d joined to catalog_lookup">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-800 text-slate-400">
-                <th className="px-4 py-3 font-medium">ASIN</th>
-                <th className="px-4 py-3 font-medium">Title</th>
-                <th className="px-4 py-3 font-medium">Units</th>
-                <th className="px-4 py-3 font-medium">Revenue</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.topProducts.map((row) => (
-                <tr key={row.asin} className="border-b border-slate-900 text-slate-200">
-                  <td className="px-4 py-4">
-                    <div className="flex items-center gap-3">
-                      <AsinImage asin={row.asin} title={row.title} size="sm" />
-                      <span className="font-medium text-cyan-300">{row.asin}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-4">{row.title}</td>
-                  <td className="px-4 py-4">{numberFmt(row.units_30d)}</td>
-                  <td className="px-4 py-4">{currency(row.revenue_30d)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </SectionCard>
-    </div>
-  );
-}
-
-function ProductsView({ data }) {
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {data.summary.map((item) => (
-          <div key={item.label} className="rounded-3xl border border-slate-800 bg-slate-950 p-5">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{item.label}</p>
-            <p className="mt-3 text-3xl font-semibold text-white">{numberFmt(item.value)}</p>
-          </div>
-        ))}
-      </div>
-
-      <SectionCard title="Products 30D" subtitle="Live search uses sheet data">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-800 text-slate-400">
-                <th className="px-4 py-3 font-medium">ASIN</th>
-                <th className="px-4 py-3 font-medium">Title</th>
-                <th className="px-4 py-3 font-medium">Brand</th>
-                <th className="px-4 py-3 font-medium">Category</th>
-                <th className="px-4 py-3 font-medium">Units</th>
-                <th className="px-4 py-3 font-medium">Revenue</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.rows.map((row) => (
-                <tr key={row.asin} className="border-b border-slate-900 text-slate-200">
-                  <td className="px-4 py-4">
-                    <div className="flex items-center gap-3">
-                      <AsinImage asin={row.asin} title={row.title} size="sm" />
-                      <span className="font-medium text-cyan-300">{row.asin}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-4">{row.title}</td>
-                  <td className="px-4 py-4">{row.brand || "—"}</td>
-                  <td className="px-4 py-4">{row.category || "—"}</td>
-                  <td className="px-4 py-4">{numberFmt(row.units_30d)}</td>
-                  <td className="px-4 py-4">{currency(row.revenue_30d)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </SectionCard>
-    </div>
-  );
-}
-
-function AdvertisingView({ data }) {
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {data.summary.map((item) => (
-          <StatCard key={item.label} {...item} icon={Megaphone} />
-        ))}
-      </div>
-
-      <SectionCard title="Vendor Central Campaigns" subtitle="From ads_1p_30d">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-800 text-slate-400">
-                <th className="px-4 py-3 font-medium">Campaign</th>
-                <th className="px-4 py-3 font-medium">Impressions</th>
-                <th className="px-4 py-3 font-medium">Clicks</th>
-                <th className="px-4 py-3 font-medium">Spend</th>
-                <th className="px-4 py-3 font-medium">Sales</th>
-                <th className="px-4 py-3 font-medium">ACOS</th>
-                <th className="px-4 py-3 font-medium">ROAS</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.rows.map((row, i) => (
-                <tr key={`${row.campaign}-${i}`} className="border-b border-slate-900 text-slate-200">
-                  <td className="px-4 py-4">{row.campaign}</td>
-                  <td className="px-4 py-4">{compactCurrency(row.impressions)}</td>
-                  <td className="px-4 py-4">{compactCurrency(row.clicks)}</td>
-                  <td className="px-4 py-4 text-amber-300">{currency(row.spend)}</td>
-                  <td className="px-4 py-4 text-cyan-300">{currency(row.sales)}</td>
-                  <td className="px-4 py-4">{pct(row.acos)}</td>
-                  <td className="px-4 py-4">{Number(row.roas || 0).toFixed(2)}x</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </SectionCard>
-    </div>
-  );
-}
-
-function InventoryView({ data }) {
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {data.cards.map((item) => (
-          <InventoryCard key={item.label} {...item} />
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <SectionCard title="1P Inventory" subtitle="From inventory_1p">
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-800 text-slate-400">
-                  <th className="px-4 py-3 font-medium">ASIN</th>
-                  <th className="px-4 py-3 font-medium">Sellable</th>
-                  <th className="px-4 py-3 font-medium">On Order</th>
-                  <th className="px-4 py-3 font-medium">Unsellable</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.inventory1p.map((row) => (
-                  <tr key={row.asin} className="border-b border-slate-900 text-slate-200">
-                    <td className="px-4 py-4 text-cyan-300">{row.asin}</td>
-                    <td className="px-4 py-4">{numberFmt(row.sellable)}</td>
-                    <td className="px-4 py-4">{numberFmt(row.on_order)}</td>
-                    <td className="px-4 py-4">{numberFmt(row.unsellable)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
-
-        <SectionCard title="3P Inventory" subtitle="From inventory_3p">
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-800 text-slate-400">
-                  <th className="px-4 py-3 font-medium">ASIN</th>
-                  <th className="px-4 py-3 font-medium">Available</th>
-                  <th className="px-4 py-3 font-medium">Inbound</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.inventory3p.map((row) => (
-                  <tr key={row.asin} className="border-b border-slate-900 text-slate-200">
-                    <td className="px-4 py-4 text-cyan-300">{row.asin}</td>
-                    <td className="px-4 py-4">{numberFmt(row.available)}</td>
-                    <td className="px-4 py-4">{numberFmt(row.inbound)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
-      </div>
-    </div>
-  );
-}
-
-export default function CombinedMarketplaceDashboardGoogleSheetsV2() {
+function App() {
   const [activeTab, setActiveTab] = useState("overview");
+  const [adView, setAdView] = useState("Campaign");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [sheetData, setSheetData] = useState({
-    sales_daily: [],
-    products_30d: [],
-    ads_1p_30d: [],
-    inventory_1p: [],
-    inventory_3p: [],
-    catalog_lookup: [],
-  });
+
+  const [campaignSheet, setCampaignSheet] = useState([]);
+  const [productSheet, setProductSheet] = useState([]);
+  const [referenceSheet, setReferenceSheet] = useState([]);
+  const [inventoryFbaSheet, setInventoryFbaSheet] = useState([]);
+  const [inventoryAwdSheet, setInventoryAwdSheet] = useState([]);
 
   useEffect(() => {
     async function load() {
       try {
         setLoading(true);
-        const [sales_daily, products_30d, ads_1p_30d, inventory_1p, inventory_3p, catalog_lookup] =
-          await Promise.all([
-            fetchSheet("sales_daily"),
-            fetchSheet("products_30d"),
-            fetchSheet("ads_1p_30d"),
-            fetchSheet("inventory_1p"),
-            fetchSheet("inventory_3p"),
-            fetchSheet("catalog_lookup"),
-          ]);
+        const [campaigns, products, reference, fba, awd] = await Promise.all([
+          fetchSheet(TAB_NAMES.campaigns),
+          fetchSheet(TAB_NAMES.productAds),
+          fetchSheet(TAB_NAMES.itemRef),
+          fetchSheet(TAB_NAMES.inventoryFba),
+          fetchSheet(TAB_NAMES.inventoryAwd),
+        ]);
 
-        setSheetData({ sales_daily, products_30d, ads_1p_30d, inventory_1p, inventory_3p, catalog_lookup });
+        setCampaignSheet(campaigns);
+        setProductSheet(products);
+        setReferenceSheet(reference);
+        setInventoryFbaSheet(fba);
+        setInventoryAwdSheet(awd);
         setError("");
       } catch (err) {
         setError(
@@ -475,182 +299,310 @@ export default function CombinedMarketplaceDashboardGoogleSheetsV2() {
         setLoading(false);
       }
     }
+
     load();
   }, []);
 
-  const catalogMap = useMemo(() => {
+  const referenceByAsin = useMemo(() => {
     const map = new Map();
-    sheetData.catalog_lookup.forEach((row) => {
-      map.set(String(row.asin || "").trim(), {
-        title: row.title || "",
-        brand: row.brand || "",
-        category: row.category || "",
+
+    referenceSheet.forEach((row) => {
+      const asin = normalizeText(pick(row, ["asin", "ASIN"])).toUpperCase();
+      if (!asin) return;
+
+      map.set(asin, {
+        asin,
+        sku: normalizeText(pick(row, ["sku", "SKU"])),
+        parentAsin: normalizeText(
+          pick(row, ["parent asin", "Parent ASIN", "parent_asin"], "")
+        ),
+        title: normalizeText(pick(row, ["Title", "title"], "")),
+        shortTitle: normalizeText(
+          pick(row, ["short title", "Short Title", "short_title"], "")
+        ),
+        imageUrl: inferImageUrl(row),
+        brand: normalizeText(pick(row, ["brand", "Brand"], "")),
+        type: normalizeText(pick(row, ["type", "Type", "item type", "Item Type"], "")),
       });
     });
+
     return map;
-  }, [sheetData.catalog_lookup]);
+  }, [referenceSheet]);
 
-  const productsRows = useMemo(() => {
-    return sheetData.products_30d
-      .map((row) => {
-        const asin = String(row.asin || "").trim();
-        const lookup = catalogMap.get(asin) || {};
-        return {
-          asin,
-          title: row.title || lookup.title || "",
-          brand: lookup.brand || row.brand || "",
-          category: lookup.category || row.category || "",
-          units_30d: normalizeNumber(row.units_30d),
-          revenue_30d: normalizeNumber(row.revenue_30d),
-        };
+  const cleanCampaignRows = useMemo(() => {
+    return campaignSheet
+      .filter((row) => {
+        const entity = normalizeText(pick(row, ["Entity", "entity"])).toLowerCase();
+        return entity === "campaign";
       })
-      .filter((row) => !query || `${row.asin} ${row.title} ${row.brand} ${row.category}`.toLowerCase().includes(query.toLowerCase()))
-      .sort((a, b) => b.revenue_30d - a.revenue_30d);
-  }, [sheetData.products_30d, catalogMap, query]);
-
-  const salesDaily = useMemo(
-    () =>
-      sheetData.sales_daily.map((row) => ({
-        date: String(row.date || ""),
-        revenue: normalizeNumber(row.revenue),
-        units: normalizeNumber(row.units),
-      })),
-    [sheetData.sales_daily]
-  );
-
-  const adsRows = useMemo(() => {
-    return sheetData.ads_1p_30d
       .map((row) => {
-        const spend = normalizeNumber(row.spend);
-        const sales = normalizeNumber(row.sales);
+        const spend = normalizeNumber(
+          pick(row, ["Spend", "Spend(USD)", "Spend USD", "Cost"])
+        );
+        const sales = normalizeNumber(
+          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 7 Day Total Sales"])
+        );
+        const clicks = normalizeNumber(pick(row, ["Clicks", "clicks"]));
+        const impressions = normalizeNumber(pick(row, ["Impressions", "impressions"]));
+        const orders = normalizeNumber(pick(row, ["Orders", "orders"]));
+
         return {
-          campaign: row.campaign || "",
-          impressions: normalizeNumber(row.impressions),
-          clicks: normalizeNumber(row.clicks),
+          campaignName: normalizeText(
+            pick(row, ["Campaign Name", "campaign_name", "Campaign"])
+          ),
+          state: normalizeText(pick(row, ["State", "state", "Status"], "—")),
+          campaignType: normalizeText(
+            pick(row, ["Campaign Type", "campaign type", "Ad Type"], "SP")
+          ),
+          impressions,
+          clicks,
           spend,
           sales,
+          orders,
+          acos: sales ? (spend / sales) * 100 : 0,
+          roas: spend ? sales / spend : 0,
+          ctr: impressions ? (clicks / impressions) * 100 : 0,
+        };
+      })
+      .filter((row) =>
+        !query ||
+        `${row.campaignName} ${row.state} ${row.campaignType}`
+          .toLowerCase()
+          .includes(query.toLowerCase())
+      )
+      .sort((a, b) => b.spend - a.spend);
+  }, [campaignSheet, query]);
+
+  const cleanProductRows = useMemo(() => {
+    return productSheet
+      .map((row) => {
+        const productField = normalizeText(
+          pick(row, ["Products", "Product", "products"], "")
+        );
+        const asin = extractAsin(productField);
+        const ref = referenceByAsin.get(asin) || {};
+
+        const spend = normalizeNumber(pick(row, ["Spend(USD)", "Spend", "Cost"]));
+        const sales = normalizeNumber(
+          pick(row, ["Sales(USD)", "Sales", "Attributed Sales"])
+        );
+        const clicks = normalizeNumber(pick(row, ["Clicks", "clicks"]));
+        const impressions = normalizeNumber(pick(row, ["Impressions", "impressions"]));
+        const orders = normalizeNumber(pick(row, ["Orders", "orders"]));
+        const ctr =
+          normalizeNumber(pick(row, ["CTR", "Ctr"])) || (impressions ? (clicks / impressions) * 100 : 0);
+        const cvr =
+          normalizeNumber(
+            pick(row, ["Conversion rate", "Conversion Rate", "CVR", "cvr"])
+          ) || (clicks ? (orders / clicks) * 100 : 0);
+
+        return {
+          asin,
+          parentAsin: ref.parentAsin || "",
+          itemType: ref.type || "",
+          shortTitle: ref.shortTitle || ref.title || asin || productField,
+          imageUrl: ref.imageUrl || (asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg` : ""),
+          brand: ref.brand || "",
+          rawProduct: productField,
+          spend,
+          sales,
+          clicks,
+          impressions,
+          orders,
+          ctr,
+          cvr,
           acos: sales ? (spend / sales) * 100 : 0,
           roas: spend ? sales / spend : 0,
         };
       })
-      .sort((a, b) => b.spend - a.spend);
-  }, [sheetData.ads_1p_30d]);
+      .filter((row) => row.asin)
+      .filter((row) =>
+        !query ||
+        `${row.asin} ${row.parentAsin} ${row.shortTitle} ${row.itemType} ${row.brand}`
+          .toLowerCase()
+          .includes(query.toLowerCase())
+      );
+  }, [productSheet, referenceByAsin, query]);
 
-  const inventory1p = useMemo(
-    () =>
-      sheetData.inventory_1p.map((row) => ({
-        asin: String(row.asin || "").trim(),
-        sellable: normalizeNumber(row.sellable),
-        on_order: normalizeNumber(row.on_order),
-        unsellable: normalizeNumber(row.unsellable),
-      })),
-    [sheetData.inventory_1p]
-  );
+  const productGrouped = useMemo(() => {
+    const map = new Map();
 
-  const inventory3p = useMemo(
-    () =>
-      sheetData.inventory_3p.map((row) => ({
-        asin: String(row.asin || "").trim(),
-        available: normalizeNumber(row.available),
-        inbound: normalizeNumber(row.inbound),
-      })),
-    [sheetData.inventory_3p]
-  );
+    cleanProductRows.forEach((row) => {
+      const key = row.asin;
+      const current = map.get(key) || {
+        asin: row.asin,
+        parentAsin: row.parentAsin,
+        itemType: row.itemType,
+        shortTitle: row.shortTitle,
+        imageUrl: row.imageUrl,
+        brand: row.brand,
+        impressions: 0,
+        clicks: 0,
+        spend: 0,
+        sales: 0,
+        orders: 0,
+      };
 
-  const overviewData = useMemo(() => {
-    const revenue30d = salesDaily.reduce((sum, row) => sum + row.revenue, 0);
-    const units30d = salesDaily.reduce((sum, row) => sum + row.units, 0);
-    const adSpend = adsRows.reduce((sum, row) => sum + row.spend, 0);
+      current.impressions += row.impressions;
+      current.clicks += row.clicks;
+      current.spend += row.spend;
+      current.sales += row.sales;
+      current.orders += row.orders;
 
-    const groupedBrand = new Map();
-    const groupedCategory = new Map();
-
-    productsRows.forEach((row) => {
-      const brand = row.brand || "Unmapped";
-      const category = row.category || "Unmapped";
-      groupedBrand.set(brand, (groupedBrand.get(brand) || 0) + row.revenue_30d);
-      groupedCategory.set(category, (groupedCategory.get(category) || 0) + row.revenue_30d);
+      map.set(key, current);
     });
 
-    return {
-      dailyTrend: salesDaily,
-      cards: [
-        { label: "Revenue (30D)", value: revenue30d, change: 0, icon: DollarSign },
-        { label: "Units Sold (30D)", value: units30d, change: 0, icon: ShoppingCart, suffix: "units" },
-        { label: "Ad Spend (1P)", value: adSpend, change: 0, icon: Megaphone },
-        { label: "TACOS", value: revenue30d ? (adSpend / revenue30d) * 100 : 0, change: 0, icon: BarChart3, suffix: "%" },
-      ],
-      byBrand: [...groupedBrand.entries()]
-        .map(([name, value]) => ({ name, value }))
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 8),
-      byCategory: [...groupedCategory.entries()]
-        .map(([name, value]) => ({ name, value }))
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 8),
-      topProducts: productsRows.slice(0, 15),
-    };
-  }, [salesDaily, adsRows, productsRows]);
+    return [...map.values()]
+      .map((row) => ({
+        ...row,
+        acos: row.sales ? (row.spend / row.sales) * 100 : 0,
+        roas: row.spend ? row.sales / row.spend : 0,
+        ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
+        cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0,
+      }))
+      .sort((a, b) => b.spend - a.spend);
+  }, [cleanProductRows]);
 
-  const productsViewData = useMemo(
-    () => ({
-      summary: [
-        { label: "Active ASINs", value: productsRows.length },
-        { label: "Brands", value: new Set(productsRows.map((r) => r.brand).filter(Boolean)).size },
-        { label: "Categories", value: new Set(productsRows.map((r) => r.category).filter(Boolean)).size },
-        { label: "Catalog Mapped", value: sheetData.catalog_lookup.length },
-      ],
-      rows: productsRows,
-    }),
-    [productsRows, sheetData.catalog_lookup.length]
-  );
+  const parentGrouped = useMemo(() => {
+    const map = new Map();
 
-  const advertisingViewData = useMemo(() => {
-    const spend = adsRows.reduce((sum, r) => sum + r.spend, 0);
-    const sales = adsRows.reduce((sum, r) => sum + r.sales, 0);
-    return {
-      summary: [
-        { label: "Total Spend", value: spend, change: 0 },
-        { label: "Ad Sales", value: sales, change: 0 },
-        { label: "ACOS", value: sales ? (spend / sales) * 100 : 0, change: 0, suffix: "%" },
-        { label: "ROAS", value: spend ? sales / spend : 0, change: 0, suffix: "x" },
-      ],
-      rows: adsRows,
-    };
-  }, [adsRows]);
+    cleanProductRows.forEach((row) => {
+      const key = row.parentAsin || "Unmapped";
+      const current = map.get(key) || {
+        parentAsin: key,
+        shortTitle: key === "Unmapped" ? "Unmapped Parent" : key,
+        itemType: "",
+        imageUrl: row.imageUrl,
+        impressions: 0,
+        clicks: 0,
+        spend: 0,
+        sales: 0,
+        orders: 0,
+      };
 
-  const inventoryViewData = useMemo(() => {
-    const total1PSellable = inventory1p.reduce((sum, row) => sum + row.sellable, 0);
-    const total1POnOrder = inventory1p.reduce((sum, row) => sum + row.on_order, 0);
-    const total1PUnsellable = inventory1p.reduce((sum, row) => sum + row.unsellable, 0);
-    const total3PAvailable = inventory3p.reduce((sum, row) => sum + row.available, 0);
-    const total3PInbound = inventory3p.reduce((sum, row) => sum + row.inbound, 0);
-    const weeklyVelocity = salesDaily.reduce((sum, row) => sum + row.units, 0) / 4 || 0;
+      current.impressions += row.impressions;
+      current.clicks += row.clicks;
+      current.spend += row.spend;
+      current.sales += row.sales;
+      current.orders += row.orders;
+
+      map.set(key, current);
+    });
+
+    return [...map.values()]
+      .map((row) => ({
+        ...row,
+        acos: row.sales ? (row.spend / row.sales) * 100 : 0,
+        roas: row.spend ? row.sales / row.spend : 0,
+        ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
+        cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0,
+      }))
+      .sort((a, b) => b.spend - a.spend);
+  }, [cleanProductRows]);
+
+  const itemTypeGrouped = useMemo(() => {
+    const map = new Map();
+
+    cleanProductRows.forEach((row) => {
+      const key = row.itemType || "Unmapped";
+      const current = map.get(key) || {
+        itemType: key,
+        impressions: 0,
+        clicks: 0,
+        spend: 0,
+        sales: 0,
+        orders: 0,
+      };
+
+      current.impressions += row.impressions;
+      current.clicks += row.clicks;
+      current.spend += row.spend;
+      current.sales += row.sales;
+      current.orders += row.orders;
+
+      map.set(key, current);
+    });
+
+    return [...map.values()]
+      .map((row) => ({
+        ...row,
+        acos: row.sales ? (row.spend / row.sales) * 100 : 0,
+        roas: row.spend ? row.sales / row.spend : 0,
+        ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
+        cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0,
+      }))
+      .sort((a, b) => b.spend - a.spend);
+  }, [cleanProductRows]);
+
+  const adSummary = useMemo(() => {
+    const spend = cleanProductRows.reduce((sum, row) => sum + row.spend, 0);
+    const sales = cleanProductRows.reduce((sum, row) => sum + row.sales, 0);
+    const clicks = cleanProductRows.reduce((sum, row) => sum + row.clicks, 0);
+    const impressions = cleanProductRows.reduce((sum, row) => sum + row.impressions, 0);
+
     return {
-      cards: [
-        { label: "1P Sellable", value: total1PSellable, kind: "number" },
-        { label: "1P On Order", value: total1POnOrder, kind: "number" },
-        { label: "3P Available", value: total3PAvailable, kind: "number" },
-        { label: "3P Inbound", value: total3PInbound, kind: "number" },
-        { label: "1P WOS", value: weeklyVelocity ? (total1PSellable + total1POnOrder) / weeklyVelocity : 0, kind: "weeks" },
-        { label: "3P WOS", value: weeklyVelocity ? (total3PAvailable + total3PInbound) / weeklyVelocity : 0, kind: "weeks" },
-        { label: "1P Unsellable", value: total1PUnsellable, kind: "number" },
-        { label: "Tracked 3P ASINs", value: inventory3p.length, kind: "number" },
-      ],
-      inventory1p: inventory1p.slice(0, 50),
-      inventory3p: inventory3p.slice(0, 50),
+      spend,
+      sales,
+      acos: sales ? (spend / sales) * 100 : 0,
+      roas: spend ? sales / spend : 0,
+      clicks,
+      impressions,
     };
-  }, [inventory1p, inventory3p, salesDaily]);
+  }, [cleanProductRows]);
+
+  const adTrend = useMemo(() => {
+    const top = productGrouped.slice(0, 10);
+    return top.map((row) => ({
+      name:
+        row.shortTitle.length > 22 ? `${row.shortTitle.slice(0, 22)}…` : row.shortTitle,
+      spend: row.spend,
+      sales: row.sales,
+    }));
+  }, [productGrouped]);
+
+  const inventorySummary = useMemo(() => {
+    const sumRows = (rows, fields) =>
+      rows.reduce((sum, row) => {
+        fields.forEach((field) => {
+          sum[field] += normalizeNumber(row[field]);
+        });
+        return sum;
+      }, Object.fromEntries(fields.map((f) => [f, 0])));
+
+    const fba = sumRows(inventoryFbaSheet, Object.keys(inventoryFbaSheet[0] || {}));
+    const awd = sumRows(inventoryAwdSheet, Object.keys(inventoryAwdSheet[0] || {}));
+
+    const fbaUnits = Object.values(fba).reduce((a, b) => a + normalizeNumber(b), 0);
+    const awdUnits = Object.values(awd).reduce((a, b) => a + normalizeNumber(b), 0);
+
+    return {
+      fbaUnits,
+      awdUnits,
+      fbaRows: inventoryFbaSheet.length,
+      awdRows: inventoryAwdSheet.length,
+    };
+  }, [inventoryFbaSheet, inventoryAwdSheet]);
+
+  const overviewCards = [
+    { label: "Ad Spend (60D)", value: adSummary.spend, icon: Megaphone },
+    { label: "Ad Sales (60D)", value: adSummary.sales, icon: DollarSign },
+    { label: "ACOS", value: adSummary.acos, suffix: "%", icon: BarChart3 },
+    { label: "ROAS", value: adSummary.roas, suffix: "x", icon: RefreshCw },
+  ];
 
   const tabs = [
-    { id: "overview", label: "Sales Overview", icon: DollarSign },
-    { id: "products", label: "Products", icon: Package },
+    { id: "overview", label: "Overview", icon: DollarSign },
     { id: "advertising", label: "Advertising", icon: Megaphone },
     { id: "inventory", label: "Inventory", icon: Warehouse },
+    { id: "catalog", label: "Catalog", icon: Package },
   ];
 
   if (loading) {
-    return <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">Loading Google Sheets data...</div>;
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
+        Loading Google Sheets data...
+      </div>
+    );
   }
 
   return (
@@ -660,32 +612,42 @@ export default function CombinedMarketplaceDashboardGoogleSheetsV2() {
           <div className="rounded-3xl border border-slate-800 bg-slate-950 p-4">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border border-slate-800 bg-white p-1.5">
-                <img src={LOGO_URL} alt="Design Headquarters" className="h-full w-full object-contain" />
+                <img src={LOGO_URL} alt="Client Logo" className="h-full w-full object-contain" />
               </div>
               <div>
-                <p className="text-lg font-semibold text-white">Design Headquarters</p>
-                <p className="text-sm text-slate-400">Google Sheets Live Demo</p>
+                <p className="text-lg font-semibold text-white">Five Star Napkins</p>
+                <p className="text-sm text-slate-400">Seller Central Dashboard</p>
               </div>
             </div>
           </div>
 
           <div className="mt-6 space-y-2">
             {tabs.map((tab) => (
-              <SidebarButton key={tab.id} active={activeTab === tab.id} icon={tab.icon} label={tab.label} onClick={() => setActiveTab(tab.id)} />
+              <SidebarButton
+                key={tab.id}
+                active={activeTab === tab.id}
+                icon={tab.icon}
+                label={tab.label}
+                onClick={() => setActiveTab(tab.id)}
+              />
             ))}
           </div>
 
           <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-950 p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Sheet source</p>
-            <p className="mt-3 break-all text-sm leading-6 text-slate-300">{SHEET_ID}</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Source</p>
+            <p className="mt-3 text-sm leading-6 text-slate-300 break-all">{SHEET_ID}</p>
           </div>
         </aside>
 
         <main className="p-4 md:p-6 xl:p-8">
           <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-white">Combined Vendor Central + Seller Central Dashboard</h1>
-              <p className="mt-2 text-sm text-slate-400">Now reading live from your Google Sheet.</p>
+              <h1 className="text-3xl font-semibold tracking-tight text-white">
+                Five Star Napkins Dashboard
+              </h1>
+              <p className="mt-2 text-sm text-slate-400">
+                Seller Central only. Live from Google Sheets.
+              </p>
             </div>
 
             <div className="flex flex-col gap-3 md:flex-row md:items-center">
@@ -694,8 +656,8 @@ export default function CombinedMarketplaceDashboardGoogleSheetsV2() {
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search ASIN, title, brand..."
-                  className="w-full rounded-2xl border border-slate-800 bg-slate-950 px-10 py-3 text-sm text-white outline-none placeholder:text-slate-500 md:w-72"
+                  placeholder="Search campaign, ASIN, parent, item type..."
+                  className="w-full rounded-2xl border border-slate-800 bg-slate-950 px-10 py-3 text-sm text-white outline-none placeholder:text-slate-500 md:w-80"
                 />
               </div>
 
@@ -709,14 +671,234 @@ export default function CombinedMarketplaceDashboardGoogleSheetsV2() {
             </div>
           </div>
 
-          {error ? <div className="mb-6 rounded-2xl border border-rose-900 bg-rose-950/40 p-4 text-sm text-rose-200">{error}</div> : null}
+          {error ? (
+            <div className="mb-6 rounded-2xl border border-rose-900 bg-rose-950/40 p-4 text-sm text-rose-200">
+              {error}
+            </div>
+          ) : null}
 
-          {activeTab === "overview" && <SalesOverview data={overviewData} />}
-          {activeTab === "products" && <ProductsView data={productsViewData} />}
-          {activeTab === "advertising" && <AdvertisingView data={advertisingViewData} />}
-          {activeTab === "inventory" && <InventoryView data={inventoryViewData} />}
+          {activeTab === "overview" && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {overviewCards.map((item) => (
+                  <StatCard
+                    key={item.label}
+                    label={item.label}
+                    value={item.value}
+                    suffix={item.suffix}
+                    icon={item.icon}
+                  />
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                <SectionCard title="Top Product Ad Sales" subtitle="Top 10 products by ad sales">
+                  <div className="h-80 w-full">
+                    <ResponsiveContainer>
+                      <BarChart data={adTrend}>
+                        <CartesianGrid stroke="#172033" vertical={false} />
+                        <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#64748b" fontSize={12} tickFormatter={(v) => `$${compactNumber(v)}`} tickLine={false} axisLine={false} />
+                        <Tooltip
+                          contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: 16 }}
+                          formatter={(v) => currency(v)}
+                        />
+                        <Bar dataKey="sales" radius={[8, 8, 0, 0]} fill="#38bdf8" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </SectionCard>
+
+                <SectionCard title="Inventory Snapshot" subtitle="FBA and AWD row counts and totals">
+                  <div className="grid grid-cols-2 gap-4">
+                    <CountCard label="FBA Units (approx)" value={inventorySummary.fbaUnits} />
+                    <CountCard label="AWD Units (approx)" value={inventorySummary.awdUnits} />
+                    <CountCard label="FBA Rows" value={inventorySummary.fbaRows} />
+                    <CountCard label="AWD Rows" value={inventorySummary.awdRows} />
+                  </div>
+                </SectionCard>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "advertising" && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <StatCard label="Spend" value={adSummary.spend} icon={Megaphone} />
+                <StatCard label="Sales" value={adSummary.sales} icon={DollarSign} />
+                <StatCard label="ACOS" value={adSummary.acos} suffix="%" icon={BarChart3} />
+                <StatCard label="ROAS" value={adSummary.roas} suffix="x" icon={RefreshCw} />
+              </div>
+
+              <SectionCard
+                title="Advertising Performance"
+                subtitle="Toggle between campaign, product, parent, and item type views"
+                right={
+                  <TogglePills
+                    value={adView}
+                    onChange={setAdView}
+                    options={["Campaign", "Product", "Parent", "Item Type"]}
+                  />
+                }
+              >
+                {adView === "Campaign" && (
+                  <Table
+                    rowKey="campaignName"
+                    columns={[
+                      { key: "campaignName", label: "Campaign" },
+                      { key: "state", label: "Status" },
+                      { key: "campaignType", label: "Type" },
+                      { key: "impressions", label: "Impr.", render: (r) => compactNumber(r.impressions) },
+                      { key: "clicks", label: "Clicks", render: (r) => compactNumber(r.clicks) },
+                      { key: "spend", label: "Spend", render: (r) => currency(r.spend) },
+                      { key: "sales", label: "Sales", render: (r) => currency(r.sales) },
+                      { key: "acos", label: "ACOS", render: (r) => pct(r.acos) },
+                      { key: "roas", label: "ROAS", render: (r) => `${r.roas.toFixed(2)}x` },
+                    ]}
+                    rows={cleanCampaignRows}
+                  />
+                )}
+
+                {adView === "Product" && (
+                  <Table
+                    rowKey="asin"
+                    columns={[
+                      {
+                        key: "asin",
+                        label: "Product",
+                        render: (r) => (
+                          <div className="flex items-center gap-3">
+                            <AsinImage src={r.imageUrl} title={r.shortTitle} />
+                            <div>
+                              <div className="font-medium text-cyan-300">{r.asin}</div>
+                              <div className="text-xs text-slate-400">{r.shortTitle}</div>
+                            </div>
+                          </div>
+                        ),
+                      },
+                      { key: "itemType", label: "Item Type" },
+                      { key: "impressions", label: "Impr.", render: (r) => compactNumber(r.impressions) },
+                      { key: "clicks", label: "Clicks", render: (r) => compactNumber(r.clicks) },
+                      { key: "spend", label: "Spend", render: (r) => currency(r.spend) },
+                      { key: "sales", label: "Sales", render: (r) => currency(r.sales) },
+                      { key: "orders", label: "Orders", render: (r) => numberFmt(r.orders) },
+                      { key: "acos", label: "ACOS", render: (r) => pct(r.acos) },
+                      { key: "roas", label: "ROAS", render: (r) => `${r.roas.toFixed(2)}x` },
+                    ]}
+                    rows={productGrouped}
+                  />
+                )}
+
+                {adView === "Parent" && (
+                  <Table
+                    rowKey="parentAsin"
+                    columns={[
+                      {
+                        key: "parentAsin",
+                        label: "Parent ASIN",
+                        render: (r) => (
+                          <div className="flex items-center gap-3">
+                            <AsinImage src={r.imageUrl} title={r.parentAsin} />
+                            <div className="font-medium text-cyan-300">{r.parentAsin}</div>
+                          </div>
+                        ),
+                      },
+                      { key: "impressions", label: "Impr.", render: (r) => compactNumber(r.impressions) },
+                      { key: "clicks", label: "Clicks", render: (r) => compactNumber(r.clicks) },
+                      { key: "spend", label: "Spend", render: (r) => currency(r.spend) },
+                      { key: "sales", label: "Sales", render: (r) => currency(r.sales) },
+                      { key: "orders", label: "Orders", render: (r) => numberFmt(r.orders) },
+                      { key: "acos", label: "ACOS", render: (r) => pct(r.acos) },
+                      { key: "roas", label: "ROAS", render: (r) => `${r.roas.toFixed(2)}x` },
+                    ]}
+                    rows={parentGrouped}
+                  />
+                )}
+
+                {adView === "Item Type" && (
+                  <Table
+                    rowKey="itemType"
+                    columns={[
+                      { key: "itemType", label: "Item Type" },
+                      { key: "impressions", label: "Impr.", render: (r) => compactNumber(r.impressions) },
+                      { key: "clicks", label: "Clicks", render: (r) => compactNumber(r.clicks) },
+                      { key: "spend", label: "Spend", render: (r) => currency(r.spend) },
+                      { key: "sales", label: "Sales", render: (r) => currency(r.sales) },
+                      { key: "orders", label: "Orders", render: (r) => numberFmt(r.orders) },
+                      { key: "acos", label: "ACOS", render: (r) => pct(r.acos) },
+                      { key: "roas", label: "ROAS", render: (r) => `${r.roas.toFixed(2)}x` },
+                    ]}
+                    rows={itemTypeGrouped}
+                  />
+                )}
+              </SectionCard>
+            </div>
+          )}
+
+          {activeTab === "inventory" && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <CountCard label="FBA Rows" value={inventorySummary.fbaRows} />
+                <CountCard label="AWD Rows" value={inventorySummary.awdRows} />
+                <CountCard label="FBA Units (approx)" value={inventorySummary.fbaUnits} />
+                <CountCard label="AWD Units (approx)" value={inventorySummary.awdUnits} />
+              </div>
+
+              <SectionCard title="FBA Inventory" subtitle="Raw sheet preview">
+                <pre className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/40 p-4 text-xs text-slate-300">
+                  {JSON.stringify(inventoryFbaSheet.slice(0, 10), null, 2)}
+                </pre>
+              </SectionCard>
+
+              <SectionCard title="AWD Inventory" subtitle="Raw sheet preview">
+                <pre className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/40 p-4 text-xs text-slate-300">
+                  {JSON.stringify(inventoryAwdSheet.slice(0, 10), null, 2)}
+                </pre>
+              </SectionCard>
+            </div>
+          )}
+
+          {activeTab === "catalog" && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <CountCard label="Reference Rows" value={referenceSheet.length} />
+                <CountCard label="Products in Ad Report" value={productGrouped.length} />
+                <CountCard label="Mapped Parents" value={parentGrouped.length} />
+                <CountCard label="Item Types" value={itemTypeGrouped.length} />
+              </div>
+
+              <SectionCard title="Catalog Preview" subtitle="Using short title from item_data_reference">
+                <Table
+                  rowKey="asin"
+                  columns={[
+                    {
+                      key: "asin",
+                      label: "Product",
+                      render: (r) => (
+                        <div className="flex items-center gap-3">
+                          <AsinImage src={r.imageUrl} title={r.shortTitle} />
+                          <div>
+                            <div className="font-medium text-cyan-300">{r.asin}</div>
+                            <div className="text-xs text-slate-400">{r.shortTitle}</div>
+                          </div>
+                        </div>
+                      ),
+                    },
+                    { key: "parentAsin", label: "Parent" },
+                    { key: "itemType", label: "Item Type" },
+                    { key: "brand", label: "Brand" },
+                    { key: "spend", label: "Ad Spend", render: (r) => currency(r.spend) },
+                    { key: "sales", label: "Ad Sales", render: (r) => currency(r.sales) },
+                  ]}
+                  rows={productGrouped.slice(0, 50)}
+                />
+              </SectionCard>
+            </div>
+          )}
         </main>
       </div>
     </div>
   );
 }
+
+export default App;
