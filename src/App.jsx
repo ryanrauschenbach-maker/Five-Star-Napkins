@@ -14,6 +14,9 @@ import {
   ChevronsUpDown,
   Boxes,
   Clock3,
+  ShieldMinus,
+  BadgeDollarSign,
+  Ban,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -33,6 +36,8 @@ const TAB_NAMES = {
   spProducts: "Products_Ad_Report",
   sbCampaigns: "Sponsored Brands Campaigns",
   sdCampaigns: "Sponsored Display Campaigns",
+  spSearchTerms: "SP Search Term Report",
+  sbSearchTerms: "SB Search Term Report",
   itemRef: "item_data_reference",
   inventoryFba: "inventory_fba",
   inventoryAwd: "inventory_awd",
@@ -41,6 +46,7 @@ const TAB_NAMES = {
 
 const DAYS_TO_SHIP_TARGET = 60;
 const DAYS_URGENT = 14;
+const NEGATIVE_CLICK_THRESHOLD = 10;
 
 function cn(...classes) {
   return classes.filter(Boolean).join(" ");
@@ -411,6 +417,21 @@ function urgencyPill(days) {
   );
 }
 
+function recommendationPill(row) {
+  if (row.alreadyBlocked) {
+    return (
+      <span className="rounded-full border border-cyan-900 bg-cyan-500/10 px-2.5 py-1 text-xs text-cyan-300">
+        Already blocked elsewhere
+      </span>
+    );
+  }
+  return (
+    <span className="rounded-full border border-amber-900 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-300">
+      Add negative
+    </span>
+  );
+}
+
 function parseInventoryRows(rows, referenceByAsin, channel) {
   return rows
     .map((row) => {
@@ -421,19 +442,11 @@ function parseInventoryRows(rows, referenceByAsin, channel) {
       const ref = referenceByAsin.get(asin) || {};
 
       let units = 0;
-
       if (channel === "fba") {
-        units = normalizeNumber(
-  pick(row, ["afn-total-quantity", "AFN Total Quantity"], 0)
-);
+        units = normalizeNumber(pick(row, ["afn-total-quantity", "AFN Total Quantity"], 0));
       } else if (channel === "awd") {
-        const available = normalizeNumber(
-          pick(row, ["Available in AWD (units)", "available in awd (units)"], 0)
-        );
-        const inbound = normalizeNumber(
-          pick(row, ["Inbound to AWD (units)", "inbound to awd (units)"], 0)
-        );
-
+        const available = normalizeNumber(pick(row, ["Available in AWD (units)", "available in awd (units)"], 0));
+        const inbound = normalizeNumber(pick(row, ["Inbound to AWD (units)", "inbound to awd (units)"], 0));
         units = available + inbound;
       }
 
@@ -442,17 +455,13 @@ function parseInventoryRows(rows, referenceByAsin, channel) {
         shortTitle:
           ref.shortTitle ||
           asin ||
-          normalizeText(
-            pick(row, ["product-name", "Product Name", "title", "Title"], "Unknown")
-          ),
+          normalizeText(pick(row, ["product-name", "Product Name", "title", "Title"], "Unknown")),
         brand: ref.brand || "",
         parentAsin: ref.parentAsin || "",
         itemType: ref.type || "",
         imageUrl:
           ref.imageUrl ||
-          (asin
-            ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`
-            : ""),
+          (asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg` : ""),
         units,
       };
     })
@@ -467,6 +476,7 @@ export default function App() {
   const [itemTypeFilter, setItemTypeFilter] = useState("All");
   const [parentFilter, setParentFilter] = useState("All");
   const [inventoryFilter, setInventoryFilter] = useState("All");
+  const [searchView, setSearchView] = useState("Recommended");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -475,6 +485,8 @@ export default function App() {
   const [spProductSheet, setSpProductSheet] = useState([]);
   const [sbCampaignSheet, setSbCampaignSheet] = useState([]);
   const [sdCampaignSheet, setSdCampaignSheet] = useState([]);
+  const [spSearchTermsSheet, setSpSearchTermsSheet] = useState([]);
+  const [sbSearchTermsSheet, setSbSearchTermsSheet] = useState([]);
   const [referenceSheet, setReferenceSheet] = useState([]);
   const [inventoryFbaSheet, setInventoryFbaSheet] = useState([]);
   const [inventoryAwdSheet, setInventoryAwdSheet] = useState([]);
@@ -489,6 +501,8 @@ export default function App() {
           spProducts,
           sbCampaigns,
           sdCampaigns,
+          spSearchTerms,
+          sbSearchTerms,
           reference,
           fba,
           awd,
@@ -498,6 +512,8 @@ export default function App() {
           fetchSheet(TAB_NAMES.spProducts),
           fetchSheet(TAB_NAMES.sbCampaigns),
           fetchSheet(TAB_NAMES.sdCampaigns),
+          fetchSheet(TAB_NAMES.spSearchTerms),
+          fetchSheet(TAB_NAMES.sbSearchTerms),
           fetchSheet(TAB_NAMES.itemRef),
           fetchSheet(TAB_NAMES.inventoryFba),
           fetchSheet(TAB_NAMES.inventoryAwd),
@@ -508,6 +524,8 @@ export default function App() {
         setSpProductSheet(spProducts);
         setSbCampaignSheet(sbCampaigns);
         setSdCampaignSheet(sdCampaigns);
+        setSpSearchTermsSheet(spSearchTerms);
+        setSbSearchTermsSheet(sbSearchTerms);
         setReferenceSheet(reference);
         setInventoryFbaSheet(fba);
         setInventoryAwdSheet(awd);
@@ -548,9 +566,7 @@ export default function App() {
       .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
       .map((row) => {
         const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
-        const sales = normalizeNumber(
-          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 7 Day Total Sales"])
-        );
+        const sales = normalizeNumber(pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 7 Day Total Sales"]));
         const clicks = normalizeNumber(pick(row, ["Clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders"]));
@@ -574,9 +590,7 @@ export default function App() {
       .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
       .map((row) => {
         const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
-        const sales = normalizeNumber(
-          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "14 Day Total Sales"])
-        );
+        const sales = normalizeNumber(pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "14 Day Total Sales"]));
         const clicks = normalizeNumber(pick(row, ["Clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders", "Orders (#)"]));
@@ -600,9 +614,7 @@ export default function App() {
       .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
       .map((row) => {
         const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
-        const sales = normalizeNumber(
-          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 14 Day Total Sales"])
-        );
+        const sales = normalizeNumber(pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 14 Day Total Sales"]));
         const clicks = normalizeNumber(pick(row, ["Clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders"]));
@@ -624,13 +636,7 @@ export default function App() {
 
     return [...sp, ...sb, ...sd]
       .filter((row) => adType === "All" || row.adType === adType)
-      .filter(
-        (row) =>
-          !query ||
-          `${row.campaignName} ${row.state} ${row.campaignType} ${row.adType}`
-            .toLowerCase()
-            .includes(query.toLowerCase())
-      );
+      .filter((row) => !query || `${row.campaignName} ${row.state} ${row.campaignType} ${row.adType}`.toLowerCase().includes(query.toLowerCase()));
   }, [spCampaignSheet, sbCampaignSheet, sdCampaignSheet, adType, query]);
 
   const spProductRows = useMemo(() => {
@@ -650,9 +656,7 @@ export default function App() {
           itemType: ref.type || "",
           brand: ref.brand || "",
           shortTitle: ref.shortTitle || asin,
-          imageUrl:
-            ref.imageUrl ||
-            (asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg` : ""),
+          imageUrl: ref.imageUrl || (asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg` : ""),
           impressions,
           clicks,
           spend,
@@ -673,9 +677,7 @@ export default function App() {
       .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
       .forEach((row) => {
         const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
-        const sales = normalizeNumber(
-          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "14 Day Total Sales"])
-        );
+        const sales = normalizeNumber(pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "14 Day Total Sales"]));
         const clicks = normalizeNumber(pick(row, ["Clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders", "Orders (#)"]));
@@ -685,7 +687,6 @@ export default function App() {
         ];
         const uniqueAsins = Array.from(new Set(asins)).filter(Boolean);
         if (!uniqueAsins.length) return;
-
         const divisor = uniqueAsins.length;
         uniqueAsins.forEach((asin) => {
           const ref = referenceByAsin.get(asin) || {};
@@ -696,9 +697,7 @@ export default function App() {
             itemType: ref.type || "",
             brand: ref.brand || "",
             shortTitle: ref.shortTitle || asin,
-            imageUrl:
-              ref.imageUrl ||
-              `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
+            imageUrl: ref.imageUrl || `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
             impressions: impressions / divisor,
             clicks: clicks / divisor,
             spend: spend / divisor,
@@ -711,7 +710,6 @@ export default function App() {
           });
         });
       });
-
     return rows;
   }, [sbCampaignSheet, referenceByAsin]);
 
@@ -719,14 +717,10 @@ export default function App() {
     return sdCampaignSheet
       .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
       .map((row) => {
-        const asin = extractAsin(
-          pick(row, ["Promoted ASIN", "ASIN", "Advertised ASIN", "Product"], "")
-        );
+        const asin = extractAsin(pick(row, ["Promoted ASIN", "ASIN", "Advertised ASIN", "Product"], ""));
         const ref = referenceByAsin.get(asin) || {};
         const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
-        const sales = normalizeNumber(
-          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 14 Day Total Sales"])
-        );
+        const sales = normalizeNumber(pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 14 Day Total Sales"]));
         const clicks = normalizeNumber(pick(row, ["Clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders"]));
@@ -736,13 +730,8 @@ export default function App() {
           parentAsin: ref.parentAsin || "",
           itemType: ref.type || "",
           brand: ref.brand || "",
-          shortTitle:
-            ref.shortTitle ||
-            asin ||
-            normalizeText(pick(row, ["Campaign Name"], "Display Campaign")),
-          imageUrl:
-            ref.imageUrl ||
-            (asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg` : ""),
+          shortTitle: ref.shortTitle || asin || normalizeText(pick(row, ["Campaign Name"], "Display Campaign")),
+          imageUrl: ref.imageUrl || (asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg` : ""),
           impressions,
           clicks,
           spend,
@@ -763,40 +752,18 @@ export default function App() {
       .filter((row) => brandFilter === "All" || row.brand === brandFilter)
       .filter((row) => itemTypeFilter === "All" || row.itemType === itemTypeFilter)
       .filter((row) => parentFilter === "All" || row.parentAsin === parentFilter)
-      .filter(
-        (row) =>
-          !query ||
-          `${row.asin} ${row.parentAsin} ${row.shortTitle} ${row.brand} ${row.itemType} ${row.adType}`
-            .toLowerCase()
-            .includes(query.toLowerCase())
-      );
+      .filter((row) => !query || `${row.asin} ${row.parentAsin} ${row.shortTitle} ${row.brand} ${row.itemType} ${row.adType}`.toLowerCase().includes(query.toLowerCase()));
   }, [spProductRows, sbProductRows, sdProductRows, adType, brandFilter, itemTypeFilter, parentFilter, query]);
 
-  const brandOptions = useMemo(
-    () => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.brand).filter(Boolean))).sort()],
-    [unifiedProductRows]
-  );
-  const itemTypeOptions = useMemo(
-    () => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.itemType).filter(Boolean))).sort()],
-    [unifiedProductRows]
-  );
-  const parentOptions = useMemo(
-    () => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.parentAsin).filter(Boolean))).sort()],
-    [unifiedProductRows]
-  );
+  const brandOptions = useMemo(() => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.brand).filter(Boolean))).sort()], [unifiedProductRows]);
+  const itemTypeOptions = useMemo(() => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.itemType).filter(Boolean))).sort()], [unifiedProductRows]);
+  const parentOptions = useMemo(() => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.parentAsin).filter(Boolean))).sort()], [unifiedProductRows]);
 
   const productGrouped = useMemo(() => {
     const map = new Map();
     unifiedProductRows.forEach((row) => {
       const key = `${row.adType}||${row.asin}`;
-      const current = map.get(key) || {
-        ...row,
-        impressions: 0,
-        clicks: 0,
-        spend: 0,
-        sales: 0,
-        orders: 0,
-      };
+      const current = map.get(key) || { ...row, impressions: 0, clicks: 0, spend: 0, sales: 0, orders: 0 };
       current.impressions += row.impressions;
       current.clicks += row.clicks;
       current.spend += row.spend;
@@ -817,16 +784,7 @@ export default function App() {
     const map = new Map();
     unifiedProductRows.forEach((row) => {
       const key = `${row.adType}||${row.parentAsin || "Unmapped"}`;
-      const current = map.get(key) || {
-        adType: row.adType,
-        parentAsin: row.parentAsin || "Unmapped",
-        imageUrl: row.imageUrl,
-        impressions: 0,
-        clicks: 0,
-        spend: 0,
-        sales: 0,
-        orders: 0,
-      };
+      const current = map.get(key) || { adType: row.adType, parentAsin: row.parentAsin || "Unmapped", imageUrl: row.imageUrl, impressions: 0, clicks: 0, spend: 0, sales: 0, orders: 0 };
       current.impressions += row.impressions;
       current.clicks += row.clicks;
       current.spend += row.spend;
@@ -847,15 +805,7 @@ export default function App() {
     const map = new Map();
     unifiedProductRows.forEach((row) => {
       const key = `${row.adType}||${row.itemType || "Unmapped"}`;
-      const current = map.get(key) || {
-        adType: row.adType,
-        itemType: row.itemType || "Unmapped",
-        impressions: 0,
-        clicks: 0,
-        spend: 0,
-        sales: 0,
-        orders: 0,
-      };
+      const current = map.get(key) || { adType: row.adType, itemType: row.itemType || "Unmapped", impressions: 0, clicks: 0, spend: 0, sales: 0, orders: 0 };
       current.impressions += row.impressions;
       current.clicks += row.clicks;
       current.spend += row.spend;
@@ -875,70 +825,43 @@ export default function App() {
   const adSummary = useMemo(() => {
     const spend = unifiedProductRows.reduce((sum, row) => sum + row.spend, 0);
     const sales = unifiedProductRows.reduce((sum, row) => sum + row.sales, 0);
-    return {
-      spend,
-      sales,
-      acos: sales ? (spend / sales) * 100 : 0,
-      roas: spend ? sales / spend : 0,
-    };
+    return { spend, sales, acos: sales ? (spend / sales) * 100 : 0, roas: spend ? sales / spend : 0 };
   }, [unifiedProductRows]);
 
   const adTrend = useMemo(() => {
     const top = [...productGrouped].sort((a, b) => b.sales - a.sales).slice(0, 10);
-    return top.map((row) => ({
-      name: row.shortTitle.length > 22 ? `${row.shortTitle.slice(0, 22)}…` : row.shortTitle,
-      sales: row.sales,
-    }));
+    return top.map((row) => ({ name: row.shortTitle.length > 22 ? `${row.shortTitle.slice(0, 22)}…` : row.shortTitle, sales: row.sales }));
   }, [productGrouped]);
 
-const salesByAsin30d = useMemo(() => {
-  const map = new Map();
+  const salesByAsin30d = useMemo(() => {
+    const map = new Map();
+    products30dSheet.forEach((row) => {
+      const asin = normalizeText(
+        pick(row, ["(Child) ASIN", "Child ASIN", "child asin", "ASIN", "asin"], "")
+      ).toUpperCase();
+      if (!asin) return;
+      const ref = referenceByAsin.get(asin) || {};
+      const unitsOrdered = normalizeNumber(pick(row, ["Units Ordered", "units ordered", "Ordered Product Sales Units"], 0));
+      const current = map.get(asin) || {
+        asin,
+        shortTitle: ref.shortTitle || asin,
+        brand: ref.brand || "",
+        parentAsin: ref.parentAsin || "",
+        itemType: ref.type || "",
+        imageUrl: ref.imageUrl || `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
+        units30d: 0,
+      };
+      current.units30d += unitsOrdered;
+      map.set(asin, current);
+    });
+    return map;
+  }, [products30dSheet, referenceByAsin]);
 
-  products30dSheet.forEach((row) => {
-    const asin = normalizeText(
-      pick(row, ["(Child) ASIN", "Child ASIN", "child asin", "ASIN", "asin"], "")
-    ).toUpperCase();
-
-    if (!asin) return;
-
-    const ref = referenceByAsin.get(asin) || {};
-
-    const unitsOrdered = normalizeNumber(
-      pick(row, ["Units Ordered", "units ordered", "Ordered Product Sales Units"], 0)
-    );
-
-    const current = map.get(asin) || {
-      asin,
-      shortTitle: ref.shortTitle || asin,
-      brand: ref.brand || "",
-      parentAsin: ref.parentAsin || "",
-      itemType: ref.type || "",
-      imageUrl:
-        ref.imageUrl ||
-        `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
-      units30d: 0,
-    };
-
-    current.units30d += unitsOrdered;
-    map.set(asin, current);
-  });
-
-  return map;
-}, [products30dSheet, referenceByAsin]);
-
-  const fbaInventoryRows = useMemo(
-    () => parseInventoryRows(inventoryFbaSheet, referenceByAsin, "fba"),
-    [inventoryFbaSheet, referenceByAsin]
-  );
-
-  const awdInventoryRows = useMemo(
-    () => parseInventoryRows(inventoryAwdSheet, referenceByAsin, "awd"),
-    [inventoryAwdSheet, referenceByAsin]
-  );
+  const fbaInventoryRows = useMemo(() => parseInventoryRows(inventoryFbaSheet, referenceByAsin, "fba"), [inventoryFbaSheet, referenceByAsin]);
+  const awdInventoryRows = useMemo(() => parseInventoryRows(inventoryAwdSheet, referenceByAsin, "awd"), [inventoryAwdSheet, referenceByAsin]);
 
   const inventoryByAsin = useMemo(() => {
     const map = new Map();
-
     const upsert = (rows, channel) => {
       rows.forEach((row) => {
         if (!row.asin) return;
@@ -957,7 +880,6 @@ const salesByAsin30d = useMemo(() => {
         map.set(row.asin, current);
       });
     };
-
     upsert(fbaInventoryRows, "fba");
     upsert(awdInventoryRows, "awd");
 
@@ -967,20 +889,13 @@ const salesByAsin30d = useMemo(() => {
       const unitsPerDay = units30d / 30;
       const totalUnits = row.fbaUnits + row.awdUnits;
       const daysOfCover = unitsPerDay > 0 ? totalUnits / unitsPerDay : Number.POSITIVE_INFINITY;
-
       return {
         ...row,
         units30d,
         unitsPerDay,
         totalUnits,
         daysOfCover,
-        urgency: !Number.isFinite(daysOfCover)
-          ? "no_sales"
-          : daysOfCover < DAYS_URGENT
-          ? "urgent"
-          : daysOfCover < DAYS_TO_SHIP_TARGET
-          ? "replenish"
-          : "healthy",
+        urgency: !Number.isFinite(daysOfCover) ? "no_sales" : daysOfCover < DAYS_URGENT ? "urgent" : daysOfCover < DAYS_TO_SHIP_TARGET ? "replenish" : "healthy",
       };
     });
   }, [fbaInventoryRows, awdInventoryRows, salesByAsin30d]);
@@ -988,30 +903,11 @@ const salesByAsin30d = useMemo(() => {
   const inventoryFiltered = useMemo(() => {
     return inventoryByAsin
       .filter((row) => inventoryFilter === "All" || row.urgency === inventoryFilter)
-      .filter(
-        (row) =>
-          !query ||
-          `${row.asin} ${row.shortTitle} ${row.brand} ${row.parentAsin} ${row.itemType}`
-            .toLowerCase()
-            .includes(query.toLowerCase())
-      );
+      .filter((row) => !query || `${row.asin} ${row.shortTitle} ${row.brand} ${row.parentAsin} ${row.itemType}`.toLowerCase().includes(query.toLowerCase()));
   }, [inventoryByAsin, inventoryFilter, query]);
 
-  const urgentInventory = useMemo(
-    () =>
-      inventoryByAsin
-        .filter((row) => row.urgency === "urgent")
-        .sort((a, b) => a.daysOfCover - b.daysOfCover),
-    [inventoryByAsin]
-  );
-
-  const replenishInventory = useMemo(
-    () =>
-      inventoryByAsin
-        .filter((row) => row.urgency === "replenish")
-        .sort((a, b) => a.daysOfCover - b.daysOfCover),
-    [inventoryByAsin]
-  );
+  const urgentInventory = useMemo(() => inventoryByAsin.filter((row) => row.urgency === "urgent").sort((a, b) => a.daysOfCover - b.daysOfCover), [inventoryByAsin]);
+  const replenishInventory = useMemo(() => inventoryByAsin.filter((row) => row.urgency === "replenish").sort((a, b) => a.daysOfCover - b.daysOfCover), [inventoryByAsin]);
 
   const inventorySummary = useMemo(() => {
     const totalFba = inventoryByAsin.reduce((sum, row) => sum + row.fbaUnits, 0);
@@ -1019,9 +915,7 @@ const salesByAsin30d = useMemo(() => {
     const atRisk = inventoryByAsin.filter((row) => row.daysOfCover < DAYS_TO_SHIP_TARGET).length;
     const urgent = inventoryByAsin.filter((row) => row.daysOfCover < DAYS_URGENT).length;
     const totalDailySales = inventoryByAsin.reduce((sum, row) => sum + row.unitsPerDay, 0);
-    const blendedDays =
-      totalDailySales > 0 ? (totalFba + totalAwd) / totalDailySales : Number.POSITIVE_INFINITY;
-
+    const blendedDays = totalDailySales > 0 ? (totalFba + totalAwd) / totalDailySales : Number.POSITIVE_INFINITY;
     return { totalFba, totalAwd, atRisk, urgent, blendedDays };
   }, [inventoryByAsin]);
 
@@ -1030,11 +924,128 @@ const salesByAsin30d = useMemo(() => {
       .filter((row) => Number.isFinite(row.daysOfCover))
       .sort((a, b) => a.daysOfCover - b.daysOfCover)
       .slice(0, 12)
-      .map((row) => ({
-        name: row.shortTitle.length > 18 ? `${row.shortTitle.slice(0, 18)}…` : row.shortTitle,
-        days: row.daysOfCover,
-      }));
+      .map((row) => ({ name: row.shortTitle.length > 18 ? `${row.shortTitle.slice(0, 18)}…` : row.shortTitle, days: row.daysOfCover }));
   }, [inventoryByAsin]);
+
+  const spExistingNegatives = useMemo(() => {
+    return spCampaignSheet
+      .filter((row) => {
+        const entity = normalizeText(pick(row, ["Entity", "entity"])).toLowerCase();
+        const matchType = normalizeText(pick(row, ["Match Type"])).toLowerCase();
+        return entity.includes("negative") || matchType.includes("negative");
+      })
+      .map((row) => ({
+        adType: "Sponsored Products",
+        entity: normalizeText(pick(row, ["Entity"])),
+        campaign: normalizeText(pick(row, ["Campaign Name (Informational only)", "Campaign Name"], "—")),
+        adGroup: normalizeText(pick(row, ["Ad Group Name (Informational only)", "Ad Group Name"], "—")),
+        term: normalizeText(pick(row, ["Keyword Text", "Product Targeting Expression"], "")),
+        matchType: normalizeText(pick(row, ["Match Type"], "—")),
+        state: normalizeText(pick(row, ["State"], "—")),
+      }))
+      .filter((row) => row.term);
+  }, [spCampaignSheet]);
+
+  const sbExistingNegatives = useMemo(() => {
+    return sbCampaignSheet
+      .filter((row) => {
+        const entity = normalizeText(pick(row, ["Entity", "entity"])).toLowerCase();
+        const matchType = normalizeText(pick(row, ["Match Type"])).toLowerCase();
+        return entity.includes("negative") || matchType.includes("negative");
+      })
+      .map((row) => ({
+        adType: "Sponsored Brands",
+        entity: normalizeText(pick(row, ["Entity"])),
+        campaign: normalizeText(pick(row, ["Campaign Name (Informational only)", "Campaign Name"], "—")),
+        adGroup: normalizeText(pick(row, ["Ad Group Name (Informational only)", "Ad Group Name"], "—")),
+        term: normalizeText(pick(row, ["Keyword Text", "Product Targeting Expression"], "")),
+        matchType: normalizeText(pick(row, ["Match Type"], "—")),
+        state: normalizeText(pick(row, ["State"], "—")),
+      }))
+      .filter((row) => row.term);
+  }, [sbCampaignSheet]);
+
+  const existingNegatives = useMemo(() => {
+    return [...spExistingNegatives, ...sbExistingNegatives]
+      .filter((row) => adType === "All" || row.adType === adType)
+      .filter((row) => !query || `${row.term} ${row.campaign} ${row.adGroup} ${row.matchType} ${row.adType}`.toLowerCase().includes(query.toLowerCase()));
+  }, [spExistingNegatives, sbExistingNegatives, adType, query]);
+
+  const existingNegativeSet = useMemo(() => {
+    return new Set(existingNegatives.map((row) => `${row.adType}||${row.term.toLowerCase()}`));
+  }, [existingNegatives]);
+
+  const unifiedSearchTerms = useMemo(() => {
+    const sp = spSearchTermsSheet.map((row) => ({
+      adType: "Sponsored Products",
+      campaign: normalizeText(pick(row, ["Campaign Name (Informational only)"], "—")),
+      adGroup: normalizeText(pick(row, ["Ad Group Name (Informational only)"], "—")),
+      state: normalizeText(pick(row, ["State"], "—")),
+      keywordText: normalizeText(pick(row, ["Keyword Text"], "")),
+      matchType: normalizeText(pick(row, ["Match Type"], "—")),
+      searchTerm: normalizeText(pick(row, ["Customer Search Term"], "")),
+      clicks: normalizeNumber(pick(row, ["Clicks"], 0)),
+      spend: normalizeNumber(pick(row, ["Spend"], 0)),
+      orders: normalizeNumber(pick(row, ["Orders"], 0)),
+      units: normalizeNumber(pick(row, ["Units"], 0)),
+      sales: normalizeNumber(pick(row, ["Sales"], 0)),
+      impressions: normalizeNumber(pick(row, ["Impressions"], 0)),
+      ctr: normalizeNumber(pick(row, ["Click-through Rate"], 0)) * 100,
+      cvr: normalizeNumber(pick(row, ["Conversion Rate"], 0)) * 100,
+    }));
+
+    const sb = sbSearchTermsSheet.map((row) => ({
+      adType: "Sponsored Brands",
+      campaign: normalizeText(pick(row, ["Campaign Name (Informational only)"], "—")),
+      adGroup: normalizeText(pick(row, ["Ad Group Name (Informational only)"], "—")),
+      state: normalizeText(pick(row, ["State"], "—")),
+      keywordText: normalizeText(pick(row, ["Keyword Text"], "")),
+      matchType: normalizeText(pick(row, ["Match Type"], "—")),
+      searchTerm: normalizeText(pick(row, ["Customer Search Term"], "")),
+      clicks: normalizeNumber(pick(row, ["Clicks"], 0)),
+      spend: normalizeNumber(pick(row, ["Spend"], 0)),
+      orders: normalizeNumber(pick(row, ["Orders"], 0)),
+      units: normalizeNumber(pick(row, ["Units"], 0)),
+      sales: normalizeNumber(pick(row, ["Sales"], 0)),
+      impressions: normalizeNumber(pick(row, ["Impressions"], 0)),
+      ctr: normalizeNumber(pick(row, ["Click-through Rate"], 0)) * 100,
+      cvr: normalizeNumber(pick(row, ["Conversion Rate"], 0)) * 100,
+    }));
+
+    return [...sp, ...sb]
+      .filter((row) => row.searchTerm)
+      .filter((row) => adType === "All" || row.adType === adType)
+      .filter((row) => !query || `${row.searchTerm} ${row.campaign} ${row.adGroup} ${row.keywordText} ${row.adType}`.toLowerCase().includes(query.toLowerCase()));
+  }, [spSearchTermsSheet, sbSearchTermsSheet, adType, query]);
+
+  const recommendedNegatives = useMemo(() => {
+    return unifiedSearchTerms
+      .filter((row) => row.clicks >= NEGATIVE_CLICK_THRESHOLD && row.orders === 0 && row.units === 0)
+      .map((row) => ({
+        ...row,
+        suggestedNegativeType: row.matchType && row.matchType.toLowerCase().includes("broad") ? "Negative Phrase" : "Negative Exact",
+        alreadyBlocked: existingNegativeSet.has(`${row.adType}||${row.searchTerm.toLowerCase()}`),
+      }))
+      .sort((a, b) => b.spend - a.spend);
+  }, [unifiedSearchTerms, existingNegativeSet]);
+
+  const wastedSpendSummary = useMemo(() => {
+    const totalWaste = recommendedNegatives.reduce((sum, row) => sum + row.spend, 0);
+    const alreadyBlockedCount = recommendedNegatives.filter((row) => row.alreadyBlocked).length;
+    const openCount = recommendedNegatives.filter((row) => !row.alreadyBlocked).length;
+    const protectedSpend = recommendedNegatives.filter((row) => row.alreadyBlocked).reduce((sum, row) => sum + row.spend, 0);
+    return { totalWaste, alreadyBlockedCount, openCount, protectedSpend };
+  }, [recommendedNegatives]);
+
+  const wasteChartData = useMemo(() => {
+    return recommendedNegatives
+      .filter((row) => !row.alreadyBlocked)
+      .slice(0, 12)
+      .map((row) => ({
+        name: row.searchTerm.length > 18 ? `${row.searchTerm.slice(0, 18)}…` : row.searchTerm,
+        spend: row.spend,
+      }));
+  }, [recommendedNegatives]);
 
   const campaignColumns = [
     { key: "adType", label: "Ad Type", type: "text" },
@@ -1173,60 +1184,67 @@ const salesByAsin30d = useMemo(() => {
     { key: "urgency", label: "Status", type: "text", render: (r) => urgencyPill(r.daysOfCover) },
   ];
 
-  const campaignSort = useSortableRows(unifiedCampaignRows, {
-    key: "spend",
-    type: "number",
-    direction: "desc",
-  });
-  const productSort = useSortableRows(productGrouped, {
-    key: "spend",
-    type: "number",
-    direction: "desc",
-  });
-  const parentSort = useSortableRows(parentGrouped, {
-    key: "spend",
-    type: "number",
-    direction: "desc",
-  });
-  const itemTypeSort = useSortableRows(itemTypeGrouped, {
-    key: "spend",
-    type: "number",
-    direction: "desc",
-  });
-  const catalogSort = useSortableRows(productGrouped.slice(0, 500), {
-    key: "sales",
-    type: "number",
-    direction: "desc",
-  });
-  const inventorySort = useSortableRows(inventoryFiltered, {
-    key: "daysOfCover",
-    type: "number",
-    direction: "asc",
-  });
-  const urgentSort = useSortableRows(urgentInventory, {
-    key: "daysOfCover",
-    type: "number",
-    direction: "asc",
-  });
-  const replenishSort = useSortableRows(replenishInventory, {
-    key: "daysOfCover",
-    type: "number",
-    direction: "asc",
-  });
+  const recommendedColumns = [
+    { key: "adType", label: "Ad Type", type: "text" },
+    { key: "searchTerm", label: "Search Term", type: "text" },
+    { key: "campaign", label: "Campaign", type: "text" },
+    { key: "adGroup", label: "Ad Group", type: "text" },
+    { key: "keywordText", label: "Keyword", type: "text" },
+    { key: "clicks", label: "Clicks", type: "number", render: (r) => numberFmt(r.clicks) },
+    { key: "spend", label: "Spend", type: "number", render: (r) => currency(r.spend) },
+    { key: "orders", label: "Orders", type: "number", render: (r) => numberFmt(r.orders) },
+    { key: "units", label: "Units", type: "number", render: (r) => numberFmt(r.units) },
+    { key: "sales", label: "Sales", type: "number", render: (r) => currency(r.sales) },
+    { key: "suggestedNegativeType", label: "Suggested Type", type: "text" },
+    { key: "alreadyBlocked", label: "Action", type: "text", render: (r) => recommendationPill(r), sortAccessor: (r) => (r.alreadyBlocked ? "z" : "a") },
+  ];
+
+  const existingNegativeColumns = [
+    { key: "adType", label: "Ad Type", type: "text" },
+    { key: "entity", label: "Entity", type: "text" },
+    { key: "term", label: "Negative Term", type: "text" },
+    { key: "matchType", label: "Match Type", type: "text" },
+    { key: "campaign", label: "Campaign", type: "text" },
+    { key: "adGroup", label: "Ad Group", type: "text" },
+    { key: "state", label: "State", type: "text" },
+  ];
+
+  const allSearchTermColumns = [
+    { key: "adType", label: "Ad Type", type: "text" },
+    { key: "searchTerm", label: "Search Term", type: "text" },
+    { key: "campaign", label: "Campaign", type: "text" },
+    { key: "adGroup", label: "Ad Group", type: "text" },
+    { key: "clicks", label: "Clicks", type: "number", render: (r) => numberFmt(r.clicks) },
+    { key: "spend", label: "Spend", type: "number", render: (r) => currency(r.spend) },
+    { key: "orders", label: "Orders", type: "number", render: (r) => numberFmt(r.orders) },
+    { key: "units", label: "Units", type: "number", render: (r) => numberFmt(r.units) },
+    { key: "sales", label: "Sales", type: "number", render: (r) => currency(r.sales) },
+    { key: "ctr", label: "CTR", type: "number", render: (r) => pct(r.ctr) },
+    { key: "cvr", label: "CVR", type: "number", render: (r) => pct(r.cvr) },
+  ];
+
+  const campaignSort = useSortableRows(unifiedCampaignRows, { key: "spend", type: "number", direction: "desc" });
+  const productSort = useSortableRows(productGrouped, { key: "spend", type: "number", direction: "desc" });
+  const parentSort = useSortableRows(parentGrouped, { key: "spend", type: "number", direction: "desc" });
+  const itemTypeSort = useSortableRows(itemTypeGrouped, { key: "spend", type: "number", direction: "desc" });
+  const catalogSort = useSortableRows(productGrouped.slice(0, 500), { key: "sales", type: "number", direction: "desc" });
+  const inventorySort = useSortableRows(inventoryFiltered, { key: "daysOfCover", type: "number", direction: "asc" });
+  const urgentSort = useSortableRows(urgentInventory, { key: "daysOfCover", type: "number", direction: "asc" });
+  const replenishSort = useSortableRows(replenishInventory, { key: "daysOfCover", type: "number", direction: "asc" });
+  const recommendedSort = useSortableRows(recommendedNegatives, { key: "spend", type: "number", direction: "desc" });
+  const existingNegativeSort = useSortableRows(existingNegatives, { key: "term", type: "text", direction: "asc" });
+  const allSearchTermSort = useSortableRows(unifiedSearchTerms, { key: "spend", type: "number", direction: "desc" });
 
   const tabs = [
     { id: "overview", label: "Overview", icon: DollarSign },
     { id: "advertising", label: "Advertising", icon: Megaphone },
+    { id: "searchTerms", label: "Search Terms", icon: ShieldMinus },
     { id: "inventory", label: "Inventory", icon: Warehouse },
     { id: "catalog", label: "Catalog", icon: Package },
   ];
 
   if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
-        Loading Google Sheets data...
-      </div>
-    );
+    return <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">Loading Google Sheets data...</div>;
   }
 
   return (
@@ -1247,13 +1265,7 @@ const salesByAsin30d = useMemo(() => {
 
           <div className="mt-6 space-y-2">
             {tabs.map((tab) => (
-              <SidebarButton
-                key={tab.id}
-                active={activeTab === tab.id}
-                icon={tab.icon}
-                label={tab.label}
-                onClick={() => setActiveTab(tab.id)}
-              />
+              <SidebarButton key={tab.id} active={activeTab === tab.id} icon={tab.icon} label={tab.label} onClick={() => setActiveTab(tab.id)} />
             ))}
           </div>
         </aside>
@@ -1261,39 +1273,23 @@ const salesByAsin30d = useMemo(() => {
         <main className="p-4 md:p-6 xl:p-8">
           <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-white">
-                Five Star Napkins Dashboard
-              </h1>
-              <p className="mt-2 text-sm text-slate-400">
-                Seller Central only. Live from Google Sheets.
-              </p>
+              <h1 className="text-3xl font-semibold tracking-tight text-white">Five Star Napkins Dashboard</h1>
+              <p className="mt-2 text-sm text-slate-400">Seller Central only. Live from Google Sheets.</p>
             </div>
 
             <div className="flex flex-col gap-3 md:flex-row md:items-center">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search campaign, ASIN, parent, item type..."
-                  className="w-full rounded-2xl border border-slate-800 bg-slate-950 px-10 py-3 text-sm text-white outline-none placeholder:text-slate-500 md:w-80"
-                />
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search campaign, ASIN, parent, item type..." className="w-full rounded-2xl border border-slate-800 bg-slate-950 px-10 py-3 text-sm text-white outline-none placeholder:text-slate-500 md:w-80" />
               </div>
 
-              <button
-                onClick={() => window.location.reload()}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-slate-800"
-              >
+              <button onClick={() => window.location.reload()} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-slate-800">
                 <RefreshCw className="h-4 w-4" /> Refresh
               </button>
             </div>
           </div>
 
-          {error ? (
-            <div className="mb-6 rounded-2xl border border-rose-900 bg-rose-950/40 p-4 text-sm text-rose-200">
-              {error}
-            </div>
-          ) : null}
+          {error ? <div className="mb-6 rounded-2xl border border-rose-900 bg-rose-950/40 p-4 text-sm text-rose-200">{error}</div> : null}
 
           {activeTab === "overview" && (
             <div className="space-y-6">
@@ -1310,63 +1306,21 @@ const salesByAsin30d = useMemo(() => {
                     <ResponsiveContainer>
                       <BarChart data={adTrend}>
                         <CartesianGrid stroke="#172033" vertical={false} />
-                        <XAxis
-                          dataKey="name"
-                          stroke="#64748b"
-                          fontSize={12}
-                          tickLine={false}
-                          axisLine={false}
-                        />
-                        <YAxis
-                          stroke="#64748b"
-                          fontSize={12}
-                          tickFormatter={(v) => `$${compactNumber(v)}`}
-                          tickLine={false}
-                          axisLine={false}
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            background: "#020617",
-                            border: "1px solid #1e293b",
-                            borderRadius: 16,
-                          }}
-                          formatter={(v) => currency(v)}
-                        />
+                        <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#64748b" fontSize={12} tickFormatter={(v) => `$${compactNumber(v)}`} tickLine={false} axisLine={false} />
+                        <Tooltip contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: 16 }} formatter={(v) => currency(v)} />
                         <Bar dataKey="sales" radius={[8, 8, 0, 0]} fill="#38bdf8" />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
                 </SectionCard>
 
-                <SectionCard
-                  title="Inventory Snapshot"
-                  subtitle="High-level stock health based on 30 day unit velocity"
-                >
+                <SectionCard title="Inventory Snapshot" subtitle="High-level stock health based on 30 day unit velocity">
                   <div className="grid grid-cols-2 gap-4">
-                    <CountCard
-                      label="At Risk < 2 Months"
-                      value={inventorySummary.atRisk}
-                      icon={Boxes}
-                      tone="amber"
-                    />
-                    <CountCard
-                      label="Urgent < 2 Weeks"
-                      value={inventorySummary.urgent}
-                      icon={AlertTriangle}
-                      tone="rose"
-                    />
-                    <CountCard
-                      label="FBA Units"
-                      value={inventorySummary.totalFba}
-                      icon={Warehouse}
-                      tone="cyan"
-                    />
-                    <CountCard
-                      label="AWD Units"
-                      value={inventorySummary.totalAwd}
-                      icon={Truck}
-                      tone="emerald"
-                    />
+                    <CountCard label="At Risk < 2 Months" value={inventorySummary.atRisk} icon={Boxes} tone="amber" />
+                    <CountCard label="Urgent < 2 Weeks" value={inventorySummary.urgent} icon={AlertTriangle} tone="rose" />
+                    <CountCard label="FBA Units" value={inventorySummary.totalFba} icon={Warehouse} tone="cyan" />
+                    <CountCard label="AWD Units" value={inventorySummary.totalAwd} icon={Truck} tone="emerald" />
                   </div>
                 </SectionCard>
               </div>
@@ -1382,205 +1336,112 @@ const salesByAsin30d = useMemo(() => {
                 <StatCard label="ROAS" value={adSummary.roas} suffix="x" icon={RefreshCw} />
               </div>
 
-              <SectionCard
-                title="Advertising Performance"
-                subtitle="Now supports Sponsored Products, Sponsored Brands, and Sponsored Display"
-                right={
-                  <TogglePills
-                    value={adView}
-                    onChange={setAdView}
-                    options={["Campaign", "Product", "Parent", "Item Type"]}
-                  />
-                }
-              >
+              <SectionCard title="Advertising Performance" subtitle="Now supports Sponsored Products, Sponsored Brands, and Sponsored Display" right={<TogglePills value={adView} onChange={setAdView} options={["Campaign", "Product", "Parent", "Item Type"]} />}>
                 <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
                   <FilterSelect label="Ad Type" value={adType} onChange={setAdType} options={adTypeOptions} />
                   <FilterSelect label="Brand" value={brandFilter} onChange={setBrandFilter} options={brandOptions} />
                   <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
                   <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
                   <div className="flex items-end">
-                    <button
-                      onClick={() => {
-                        setAdType("All");
-                        setBrandFilter("All");
-                        setItemTypeFilter("All");
-                        setParentFilter("All");
-                      }}
-                      className="w-full rounded-2xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm text-slate-200 transition hover:bg-slate-800"
-                    >
-                      Clear filters
-                    </button>
+                    <button onClick={() => { setAdType("All"); setBrandFilter("All"); setItemTypeFilter("All"); setParentFilter("All"); }} className="w-full rounded-2xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm text-slate-200 transition hover:bg-slate-800">Clear filters</button>
                   </div>
                 </div>
 
-                {adView === "Campaign" && (
-                  <SortableTable
-                    rowKey="campaignName"
-                    columns={campaignColumns}
-                    rows={campaignSort.sortedRows}
-                    sortConfig={campaignSort.sortConfig}
-                    onSort={campaignSort.handleSort}
-                  />
-                )}
-                {adView === "Product" && (
-                  <SortableTable
-                    rowKey={(row) => `${row.adType}-${row.asin}`}
-                    columns={productColumns}
-                    rows={productSort.sortedRows}
-                    sortConfig={productSort.sortConfig}
-                    onSort={productSort.handleSort}
-                  />
-                )}
-                {adView === "Parent" && (
-                  <SortableTable
-                    rowKey={(row) => `${row.adType}-${row.parentAsin}`}
-                    columns={parentColumns}
-                    rows={parentSort.sortedRows}
-                    sortConfig={parentSort.sortConfig}
-                    onSort={parentSort.handleSort}
-                  />
-                )}
-                {adView === "Item Type" && (
-                  <SortableTable
-                    rowKey={(row) => `${row.adType}-${row.itemType}`}
-                    columns={itemTypeColumns}
-                    rows={itemTypeSort.sortedRows}
-                    sortConfig={itemTypeSort.sortConfig}
-                    onSort={itemTypeSort.handleSort}
-                  />
-                )}
+                {adView === "Campaign" && <SortableTable rowKey="campaignName" columns={campaignColumns} rows={campaignSort.sortedRows} sortConfig={campaignSort.sortConfig} onSort={campaignSort.handleSort} />}
+                {adView === "Product" && <SortableTable rowKey={(row) => `${row.adType}-${row.asin}`} columns={productColumns} rows={productSort.sortedRows} sortConfig={productSort.sortConfig} onSort={productSort.handleSort} />}
+                {adView === "Parent" && <SortableTable rowKey={(row) => `${row.adType}-${row.parentAsin}`} columns={parentColumns} rows={parentSort.sortedRows} sortConfig={parentSort.sortConfig} onSort={parentSort.handleSort} />}
+                {adView === "Item Type" && <SortableTable rowKey={(row) => `${row.adType}-${row.itemType}`} columns={itemTypeColumns} rows={itemTypeSort.sortedRows} sortConfig={itemTypeSort.sortConfig} onSort={itemTypeSort.handleSort} />}
               </SectionCard>
+            </div>
+          )}
+
+          {activeTab === "searchTerms" && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <CountCard label="Recommended Negatives" value={wastedSpendSummary.openCount} icon={ShieldMinus} tone="amber" />
+                <CountCard label="Existing Negatives" value={existingNegatives.length} icon={Ban} tone="cyan" />
+                <StatCard label="Wasted Spend 60D" value={wastedSpendSummary.totalWaste} icon={BadgeDollarSign} tone="rose" />
+                <StatCard label="Spend Already Protected" value={wastedSpendSummary.protectedSpend} icon={ShieldMinus} tone="emerald" />
+              </div>
+
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.2fr_1fr]">
+                <SectionCard title="Search Term Intelligence" subtitle="Shows existing negatives plus search terms with 10+ clicks and no conversions" right={<TogglePills value={searchView} onChange={setSearchView} options={["Recommended", "Existing Negatives", "All Terms"]} />}>
+                  <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-4">
+                    <FilterSelect label="Ad Type" value={adType} onChange={setAdType} options={adTypeOptions} />
+                    <FilterSelect label="Brand" value={brandFilter} onChange={setBrandFilter} options={brandOptions} />
+                    <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
+                    <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
+                  </div>
+
+                  {searchView === "Recommended" && <SortableTable rowKey={(row, i) => `${row.adType}-${row.searchTerm}-${i}`} columns={recommendedColumns} rows={recommendedSort.sortedRows} sortConfig={recommendedSort.sortConfig} onSort={recommendedSort.handleSort} />}
+                  {searchView === "Existing Negatives" && <SortableTable rowKey={(row, i) => `${row.adType}-${row.term}-${i}`} columns={existingNegativeColumns} rows={existingNegativeSort.sortedRows} sortConfig={existingNegativeSort.sortConfig} onSort={existingNegativeSort.handleSort} />}
+                  {searchView === "All Terms" && <SortableTable rowKey={(row, i) => `${row.adType}-${row.searchTerm}-${i}`} columns={allSearchTermColumns} rows={allSearchTermSort.sortedRows} sortConfig={allSearchTermSort.sortConfig} onSort={allSearchTermSort.handleSort} />}
+                </SectionCard>
+
+                <SectionCard title="Top Waste Terms" subtitle="Highest-spend search terms still recommended for negative matching">
+                  <div className="h-96 w-full">
+                    <ResponsiveContainer>
+                      <BarChart data={wasteChartData} layout="vertical" margin={{ left: 10, right: 10 }}>
+                        <CartesianGrid stroke="#172033" horizontal={false} />
+                        <XAxis type="number" stroke="#64748b" tickLine={false} axisLine={false} />
+                        <YAxis type="category" dataKey="name" width={120} stroke="#64748b" tickLine={false} axisLine={false} fontSize={12} />
+                        <Tooltip contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: 16 }} formatter={(v) => currency(v)} />
+                        <Bar dataKey="spend" radius={[0, 8, 8, 0]} fill="#f59e0b" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </SectionCard>
+              </div>
             </div>
           )}
 
           {activeTab === "inventory" && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-                <CountCard
-                  label="Blended Cover"
-                  value={inventorySummary.blendedDays}
-                  suffix="count"
-                  icon={Clock3}
-                  tone="cyan"
-                />
-                <CountCard
-                  label="At Risk < 60d"
-                  value={inventorySummary.atRisk}
-                  icon={Boxes}
-                  tone="amber"
-                />
-                <CountCard
-                  label="Urgent < 14d"
-                  value={inventorySummary.urgent}
-                  icon={AlertTriangle}
-                  tone="rose"
-                />
-                <CountCard
-                  label="FBA Units"
-                  value={inventorySummary.totalFba}
-                  icon={Warehouse}
-                  tone="cyan"
-                />
-                <CountCard
-                  label="AWD Units"
-                  value={inventorySummary.totalAwd}
-                  icon={Truck}
-                  tone="emerald"
-                />
+                <CountCard label="Blended Cover" value={inventorySummary.blendedDays} suffix="count" icon={Clock3} tone="cyan" />
+                <CountCard label="At Risk < 60d" value={inventorySummary.atRisk} icon={Boxes} tone="amber" />
+                <CountCard label="Urgent < 14d" value={inventorySummary.urgent} icon={AlertTriangle} tone="rose" />
+                <CountCard label="FBA Units" value={inventorySummary.totalFba} icon={Warehouse} tone="cyan" />
+                <CountCard label="AWD Units" value={inventorySummary.totalAwd} icon={Truck} tone="emerald" />
               </div>
 
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                <SectionCard
-                  title="Urgent Block"
-                  subtitle="ASINs below 2 weeks of cover need immediate attention"
-                >
+                <SectionCard title="Urgent Block" subtitle="ASINs below 2 weeks of cover need immediate attention">
                   {urgentInventory.length === 0 ? (
-                    <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">
-                      No ASINs are below 2 weeks of cover.
-                    </div>
+                    <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">No ASINs are below 2 weeks of cover.</div>
                   ) : (
-                    <SortableTable
-                      rowKey="asin"
-                      columns={inventoryColumns}
-                      rows={urgentSort.sortedRows.slice(0, 25)}
-                      sortConfig={urgentSort.sortConfig}
-                      onSort={urgentSort.handleSort}
-                    />
+                    <SortableTable rowKey="asin" columns={inventoryColumns} rows={urgentSort.sortedRows.slice(0, 25)} sortConfig={urgentSort.sortConfig} onSort={urgentSort.handleSort} />
                   )}
                 </SectionCard>
 
-                <SectionCard
-                  title="Replenishment Watch"
-                  subtitle="ASINs below 2 months of cover but above urgent threshold"
-                >
+                <SectionCard title="Replenishment Watch" subtitle="ASINs below 2 months of cover but above urgent threshold">
                   {replenishInventory.length === 0 ? (
-                    <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">
-                      Nothing currently falls into the watch window.
-                    </div>
+                    <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">Nothing currently falls into the watch window.</div>
                   ) : (
-                    <SortableTable
-                      rowKey="asin"
-                      columns={inventoryColumns}
-                      rows={replenishSort.sortedRows.slice(0, 25)}
-                      sortConfig={replenishSort.sortConfig}
-                      onSort={replenishSort.handleSort}
-                    />
+                    <SortableTable rowKey="asin" columns={inventoryColumns} rows={replenishSort.sortedRows.slice(0, 25)} sortConfig={replenishSort.sortConfig} onSort={replenishSort.handleSort} />
                   )}
                 </SectionCard>
               </div>
 
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.25fr_1fr]">
-                <SectionCard
-                  title="Inventory Risk by ASIN"
-                  subtitle="All tracked ASINs, sortable by cover, stock, and sales"
-                >
+                <SectionCard title="Inventory Risk by ASIN" subtitle="All tracked ASINs, sortable by cover, stock, and sales">
                   <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-4">
-                    <FilterSelect
-                      label="Inventory View"
-                      value={inventoryFilter}
-                      onChange={setInventoryFilter}
-                      options={["All", "urgent", "replenish", "healthy", "no_sales"]}
-                    />
+                    <FilterSelect label="Inventory View" value={inventoryFilter} onChange={setInventoryFilter} options={["All", "urgent", "replenish", "healthy", "no_sales"]} />
                     <FilterSelect label="Brand" value={brandFilter} onChange={setBrandFilter} options={brandOptions} />
                     <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
                     <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
                   </div>
-
-                  <SortableTable
-                    rowKey="asin"
-                    columns={inventoryColumns}
-                    rows={inventorySort.sortedRows}
-                    sortConfig={inventorySort.sortConfig}
-                    onSort={inventorySort.handleSort}
-                  />
+                  <SortableTable rowKey="asin" columns={inventoryColumns} rows={inventorySort.sortedRows} sortConfig={inventorySort.sortConfig} onSort={inventorySort.handleSort} />
                 </SectionCard>
 
-                <SectionCard
-                  title="Lowest Cover ASINs"
-                  subtitle="Quick visual for the 12 tightest stock positions"
-                >
+                <SectionCard title="Lowest Cover ASINs" subtitle="Quick visual for the 12 tightest stock positions">
                   <div className="h-96 w-full">
                     <ResponsiveContainer>
                       <BarChart data={riskChartData} layout="vertical" margin={{ left: 10, right: 10 }}>
                         <CartesianGrid stroke="#172033" horizontal={false} />
                         <XAxis type="number" stroke="#64748b" tickLine={false} axisLine={false} />
-                        <YAxis
-                          type="category"
-                          dataKey="name"
-                          width={120}
-                          stroke="#64748b"
-                          tickLine={false}
-                          axisLine={false}
-                          fontSize={12}
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            background: "#020617",
-                            border: "1px solid #1e293b",
-                            borderRadius: 16,
-                          }}
-                          formatter={(v) => daysLabel(v)}
-                        />
+                        <YAxis type="category" dataKey="name" width={120} stroke="#64748b" tickLine={false} axisLine={false} fontSize={12} />
+                        <Tooltip contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: 16 }} formatter={(v) => daysLabel(v)} />
                         <Bar dataKey="days" radius={[0, 8, 8, 0]} fill="#f59e0b" />
                       </BarChart>
                     </ResponsiveContainer>
@@ -1606,13 +1467,7 @@ const salesByAsin30d = useMemo(() => {
                   <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
                   <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
                 </div>
-                <SortableTable
-                  rowKey={(row) => `${row.adType}-${row.asin}`}
-                  columns={catalogColumns}
-                  rows={catalogSort.sortedRows}
-                  sortConfig={catalogSort.sortConfig}
-                  onSort={catalogSort.handleSort}
-                />
+                <SortableTable rowKey={(row) => `${row.adType}-${row.asin}`} columns={catalogColumns} rows={catalogSort.sortedRows} sortConfig={catalogSort.sortConfig} onSort={catalogSort.handleSort} />
               </SectionCard>
             </div>
           )}
