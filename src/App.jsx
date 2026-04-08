@@ -145,6 +145,7 @@ function inferImageUrl(row) {
 
 function AsinImage({ src, title }) {
   const [errored, setErrored] = useState(false);
+
   if (!src || errored) {
     return (
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-800 bg-slate-900 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
@@ -152,6 +153,7 @@ function AsinImage({ src, title }) {
       </div>
     );
   }
+
   return (
     <img
       src={src}
@@ -167,10 +169,15 @@ function sortRows(rows, sortConfig) {
   if (!sortConfig?.key) return rows;
   const { key, direction, type = "text", accessor } = sortConfig;
   const dir = direction === "desc" ? -1 : 1;
+
   return [...rows].sort((a, b) => {
     const av = accessor ? accessor(a) : a[key];
     const bv = accessor ? accessor(b) : b[key];
-    if (type === "number") return (normalizeNumber(av) - normalizeNumber(bv)) * dir;
+
+    if (type === "number") {
+      return (normalizeNumber(av) - normalizeNumber(bv)) * dir;
+    }
+
     return (
       String(av ?? "").localeCompare(String(bv ?? ""), undefined, {
         numeric: true,
@@ -221,9 +228,14 @@ function SortableTable({ columns, rows, rowKey, sortConfig, onSort }) {
         </thead>
         <tbody>
           {rows.map((row, idx) => (
-            <tr key={typeof rowKey === "function" ? rowKey(row, idx) : row[rowKey] || idx} className="border-b border-slate-900 text-slate-200">
+            <tr
+              key={typeof rowKey === "function" ? rowKey(row, idx) : row[rowKey] || idx}
+              className="border-b border-slate-900 text-slate-200"
+            >
               {columns.map((col) => (
-                <td key={col.key} className="px-4 py-4 align-middle">{col.render ? col.render(row) : row[col.key]}</td>
+                <td key={col.key} className="px-4 py-4 align-middle">
+                  {col.render ? col.render(row) : row[col.key]}
+                </td>
               ))}
             </tr>
           ))}
@@ -242,9 +254,19 @@ function useSortableRows(rows, defaultConfig) {
     const accessor = column.sortAccessor;
     setSortConfig((current) => {
       if (current?.key === column.key) {
-        return { key: column.key, type, accessor, direction: current.direction === "asc" ? "desc" : "asc" };
+        return {
+          key: column.key,
+          type,
+          accessor,
+          direction: current.direction === "asc" ? "desc" : "asc",
+        };
       }
-      return { key: column.key, type, accessor, direction: type === "text" ? "asc" : "desc" };
+      return {
+        key: column.key,
+        type,
+        accessor,
+        direction: type === "text" ? "asc" : "desc",
+      };
     });
   }
 
@@ -257,7 +279,9 @@ function SidebarButton({ active, icon: Icon, label, onClick }) {
       onClick={onClick}
       className={cn(
         "flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition",
-        active ? "bg-slate-800 text-white shadow-lg shadow-cyan-500/10" : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+        active
+          ? "bg-slate-800 text-white shadow-lg shadow-cyan-500/10"
+          : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
       )}
     >
       <Icon className="h-4 w-4" />
@@ -267,7 +291,15 @@ function SidebarButton({ active, icon: Icon, label, onClick }) {
 }
 
 function StatCard({ label, value, suffix, icon: Icon, tone = "cyan" }) {
-  const formatted = suffix === "%" ? pct(value) : suffix === "x" ? `${Number(value || 0).toFixed(2)}x` : typeof value === "number" && suffix === "count" ? numberFmt(value) : currency(value);
+  const formatted =
+    suffix === "%"
+      ? pct(value)
+      : suffix === "x"
+      ? `${Number(value || 0).toFixed(2)}x`
+      : suffix === "count"
+      ? numberFmt(value)
+      : currency(value);
+
   const toneMap = {
     cyan: "text-cyan-300",
     amber: "text-amber-300",
@@ -282,7 +314,7 @@ function StatCard({ label, value, suffix, icon: Icon, tone = "cyan" }) {
           <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{label}</p>
           <p className="mt-2 text-3xl font-semibold text-white">{formatted}</p>
         </div>
-        <div className={cn("rounded-2xl border border-slate-800 bg-slate-900 p-3", toneMap[tone] || "text-cyan-300")}>
+        <div className={cn("rounded-2xl border border-slate-800 bg-slate-900 p-3", toneMap[tone])}>
           <Icon className="h-5 w-5" />
         </div>
       </div>
@@ -318,7 +350,9 @@ function TogglePills({ value, onChange, options }) {
           onClick={() => onChange(option)}
           className={cn(
             "rounded-full border px-3 py-1.5 text-xs transition",
-            value === option ? "border-cyan-400 bg-cyan-400/10 text-cyan-300" : "border-slate-800 bg-slate-900 text-slate-300 hover:bg-slate-800"
+            value === option
+              ? "border-cyan-400 bg-cyan-400/10 text-cyan-300"
+              : "border-slate-800 bg-slate-900 text-slate-300 hover:bg-slate-800"
           )}
         >
           {option}
@@ -332,9 +366,15 @@ function FilterSelect({ label, value, onChange, options }) {
   return (
     <label className="flex flex-col gap-1 text-xs text-slate-400">
       <span>{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="rounded-2xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white outline-none">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded-2xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
+      >
         {options.map((option) => (
-          <option key={option} value={option}>{option}</option>
+          <option key={option} value={option}>
+            {option}
+          </option>
         ))}
       </select>
     </label>
@@ -342,44 +382,87 @@ function FilterSelect({ label, value, onChange, options }) {
 }
 
 function urgencyPill(days) {
-  if (!Number.isFinite(days)) return <span className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-slate-300">No sales</span>;
-  if (days < DAYS_URGENT) return <span className="rounded-full border border-rose-900 bg-rose-500/10 px-2.5 py-1 text-xs text-rose-300">Urgent</span>;
-  if (days < DAYS_TO_SHIP_TARGET) return <span className="rounded-full border border-amber-900 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-300">Replenish</span>;
-  return <span className="rounded-full border border-emerald-900 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-300">Healthy</span>;
+  if (!Number.isFinite(days)) {
+    return (
+      <span className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-slate-300">
+        No sales
+      </span>
+    );
+  }
+  if (days < DAYS_URGENT) {
+    return (
+      <span className="rounded-full border border-rose-900 bg-rose-500/10 px-2.5 py-1 text-xs text-rose-300">
+        Urgent
+      </span>
+    );
+  }
+  if (days < DAYS_TO_SHIP_TARGET) {
+    return (
+      <span className="rounded-full border border-amber-900 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-300">
+        Replenish
+      </span>
+    );
+  }
+  return (
+    <span className="rounded-full border border-emerald-900 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-300">
+      Healthy
+    </span>
+  );
 }
 
-function parseInventoryRows(rows, referenceByAsin) {
+function parseInventoryRows(rows, referenceByAsin, channel) {
   return rows
     .map((row) => {
-      const asin = normalizeText(pick(row, ["asin", "ASIN", "fnsku", "FNSKU", "msku", "MSKU"], "")).toUpperCase();
+      const asin = normalizeText(
+        pick(row, ["asin", "ASIN", "fnsku", "FNSKU", "msku", "MSKU"], "")
+      ).toUpperCase();
+
       const ref = referenceByAsin.get(asin) || {};
-      const units = normalizeNumber(
-        pick(row, [
-          "available",
-          "Available",
-          "available quantity",
-          "Available quantity",
-          "sellable quantity",
-          "Sellable Quantity",
-          "on_hand",
-          "On Hand",
-          "quantity",
-          "Quantity",
-          "inventory",
-          "Inventory",
-          "Total Units",
-          "total units",
-          "units",
-          "Units",
-        ])
-      );
+
+      let units = 0;
+
+      if (channel === "fba") {
+        const fulfillable = normalizeNumber(
+          pick(row, ["afn-fulfillable-quantity", "AFN Fulfillable Quantity"], 0)
+        );
+        const inboundWorking = normalizeNumber(
+          pick(row, ["afn-inbound-working-quantity", "AFN Inbound Working Quantity"], 0)
+        );
+        const inboundShipped = normalizeNumber(
+          pick(row, ["afn-inbound-shipped-quantity", "AFN Inbound Shipped Quantity"], 0)
+        );
+        const inboundReceiving = normalizeNumber(
+          pick(row, ["afn-inbound-receiving-quantity", "AFN Inbound Receiving Quantity"], 0)
+        );
+
+        units = fulfillable + inboundWorking + inboundShipped + inboundReceiving;
+      } else if (channel === "awd") {
+        const available = normalizeNumber(
+          pick(row, ["Available in AWD (units)", "available in awd (units)"], 0)
+        );
+        const inbound = normalizeNumber(
+          pick(row, ["Inbound to AWD (units)", "inbound to awd (units)"], 0)
+        );
+
+        units = available + inbound;
+      }
+
       return {
         asin,
-        shortTitle: ref.shortTitle || asin || normalizeText(pick(row, ["product name", "Product Name", "title", "Title"], "Unknown")),
+        shortTitle:
+          ref.shortTitle ||
+          asin ||
+          normalizeText(
+            pick(row, ["product-name", "Product Name", "title", "Title"], "Unknown")
+          ),
         brand: ref.brand || "",
         parentAsin: ref.parentAsin || "",
         itemType: ref.type || "",
-        imageUrl: ref.imageUrl || (asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg` : ""),
+        imageUrl:
+          ref.imageUrl ||
+          (asin
+            ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`
+            : ""),
         units,
       };
     })
@@ -410,15 +493,17 @@ export default function App() {
     async function load() {
       try {
         setLoading(true);
-        const [spCampaigns, spProducts, sbCampaigns, sdCampaigns, reference, fba, awd] = await Promise.all([
-          fetchSheet(TAB_NAMES.spCampaigns),
-          fetchSheet(TAB_NAMES.spProducts),
-          fetchSheet(TAB_NAMES.sbCampaigns),
-          fetchSheet(TAB_NAMES.sdCampaigns),
-          fetchSheet(TAB_NAMES.itemRef),
-          fetchSheet(TAB_NAMES.inventoryFba),
-          fetchSheet(TAB_NAMES.inventoryAwd),
-        ]);
+        const [spCampaigns, spProducts, sbCampaigns, sdCampaigns, reference, fba, awd] =
+          await Promise.all([
+            fetchSheet(TAB_NAMES.spCampaigns),
+            fetchSheet(TAB_NAMES.spProducts),
+            fetchSheet(TAB_NAMES.sbCampaigns),
+            fetchSheet(TAB_NAMES.sdCampaigns),
+            fetchSheet(TAB_NAMES.itemRef),
+            fetchSheet(TAB_NAMES.inventoryFba),
+            fetchSheet(TAB_NAMES.inventoryAwd),
+          ]);
+
         setSpCampaignSheet(spCampaigns);
         setSpProductSheet(spProducts);
         setSbCampaignSheet(sbCampaigns);
@@ -428,7 +513,9 @@ export default function App() {
         setInventoryAwdSheet(awd);
         setError("");
       } catch {
-        setError("Could not load Google Sheets data. Make sure the sheet is shared to 'Anyone with the link can view' and the tab names match exactly.");
+        setError(
+          "Could not load Google Sheets data. Make sure the sheet is shared to 'Anyone with the link can view' and the tab names match exactly."
+        );
       } finally {
         setLoading(false);
       }
@@ -460,7 +547,9 @@ export default function App() {
       .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
       .map((row) => {
         const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
-        const sales = normalizeNumber(pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 7 Day Total Sales"]));
+        const sales = normalizeNumber(
+          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 7 Day Total Sales"])
+        );
         const clicks = normalizeNumber(pick(row, ["Clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders"]));
@@ -484,7 +573,9 @@ export default function App() {
       .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
       .map((row) => {
         const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
-        const sales = normalizeNumber(pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "14 Day Total Sales"]));
+        const sales = normalizeNumber(
+          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "14 Day Total Sales"])
+        );
         const clicks = normalizeNumber(pick(row, ["Clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders", "Orders (#)"]));
@@ -508,7 +599,9 @@ export default function App() {
       .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
       .map((row) => {
         const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
-        const sales = normalizeNumber(pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 14 Day Total Sales"]));
+        const sales = normalizeNumber(
+          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 14 Day Total Sales"])
+        );
         const clicks = normalizeNumber(pick(row, ["Clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders"]));
@@ -530,7 +623,13 @@ export default function App() {
 
     return [...sp, ...sb, ...sd]
       .filter((row) => adType === "All" || row.adType === adType)
-      .filter((row) => !query || `${row.campaignName} ${row.state} ${row.campaignType} ${row.adType}`.toLowerCase().includes(query.toLowerCase()));
+      .filter(
+        (row) =>
+          !query ||
+          `${row.campaignName} ${row.state} ${row.campaignType} ${row.adType}`
+            .toLowerCase()
+            .includes(query.toLowerCase())
+      );
   }, [spCampaignSheet, sbCampaignSheet, sdCampaignSheet, adType, query]);
 
   const spProductRows = useMemo(() => {
@@ -550,7 +649,9 @@ export default function App() {
           itemType: ref.type || "",
           brand: ref.brand || "",
           shortTitle: ref.shortTitle || asin,
-          imageUrl: ref.imageUrl || (asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg` : ""),
+          imageUrl:
+            ref.imageUrl ||
+            (asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg` : ""),
           impressions,
           clicks,
           spend,
@@ -571,13 +672,19 @@ export default function App() {
       .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
       .forEach((row) => {
         const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
-        const sales = normalizeNumber(pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "14 Day Total Sales"]));
+        const sales = normalizeNumber(
+          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "14 Day Total Sales"])
+        );
         const clicks = normalizeNumber(pick(row, ["Clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders", "Orders (#)"]));
-        const asins = [...extractAsins(pick(row, ["Creative ASINs"], "")), ...extractAsins(pick(row, ["Landing Page URL"], ""))];
+        const asins = [
+          ...extractAsins(pick(row, ["Creative ASINs"], "")),
+          ...extractAsins(pick(row, ["Landing Page URL"], "")),
+        ];
         const uniqueAsins = Array.from(new Set(asins)).filter(Boolean);
         if (!uniqueAsins.length) return;
+
         const divisor = uniqueAsins.length;
         uniqueAsins.forEach((asin) => {
           const ref = referenceByAsin.get(asin) || {};
@@ -588,7 +695,9 @@ export default function App() {
             itemType: ref.type || "",
             brand: ref.brand || "",
             shortTitle: ref.shortTitle || asin,
-            imageUrl: ref.imageUrl || `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
+            imageUrl:
+              ref.imageUrl ||
+              `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
             impressions: impressions / divisor,
             clicks: clicks / divisor,
             spend: spend / divisor,
@@ -601,6 +710,7 @@ export default function App() {
           });
         });
       });
+
     return rows;
   }, [sbCampaignSheet, referenceByAsin]);
 
@@ -608,10 +718,14 @@ export default function App() {
     return sdCampaignSheet
       .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
       .map((row) => {
-        const asin = extractAsin(pick(row, ["Promoted ASIN", "ASIN", "Advertised ASIN", "Product"], ""));
+        const asin = extractAsin(
+          pick(row, ["Promoted ASIN", "ASIN", "Advertised ASIN", "Product"], "")
+        );
         const ref = referenceByAsin.get(asin) || {};
         const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
-        const sales = normalizeNumber(pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 14 Day Total Sales"]));
+        const sales = normalizeNumber(
+          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 14 Day Total Sales"])
+        );
         const clicks = normalizeNumber(pick(row, ["Clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders"]));
@@ -621,8 +735,13 @@ export default function App() {
           parentAsin: ref.parentAsin || "",
           itemType: ref.type || "",
           brand: ref.brand || "",
-          shortTitle: ref.shortTitle || asin || normalizeText(pick(row, ["Campaign Name"], "Display Campaign")),
-          imageUrl: ref.imageUrl || (asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg` : ""),
+          shortTitle:
+            ref.shortTitle ||
+            asin ||
+            normalizeText(pick(row, ["Campaign Name"], "Display Campaign")),
+          imageUrl:
+            ref.imageUrl ||
+            (asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg` : ""),
           impressions,
           clicks,
           spend,
@@ -643,18 +762,40 @@ export default function App() {
       .filter((row) => brandFilter === "All" || row.brand === brandFilter)
       .filter((row) => itemTypeFilter === "All" || row.itemType === itemTypeFilter)
       .filter((row) => parentFilter === "All" || row.parentAsin === parentFilter)
-      .filter((row) => !query || `${row.asin} ${row.parentAsin} ${row.shortTitle} ${row.brand} ${row.itemType} ${row.adType}`.toLowerCase().includes(query.toLowerCase()));
+      .filter(
+        (row) =>
+          !query ||
+          `${row.asin} ${row.parentAsin} ${row.shortTitle} ${row.brand} ${row.itemType} ${row.adType}`
+            .toLowerCase()
+            .includes(query.toLowerCase())
+      );
   }, [spProductRows, sbProductRows, sdProductRows, adType, brandFilter, itemTypeFilter, parentFilter, query]);
 
-  const brandOptions = useMemo(() => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.brand).filter(Boolean))).sort()], [unifiedProductRows]);
-  const itemTypeOptions = useMemo(() => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.itemType).filter(Boolean))).sort()], [unifiedProductRows]);
-  const parentOptions = useMemo(() => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.parentAsin).filter(Boolean))).sort()], [unifiedProductRows]);
+  const brandOptions = useMemo(
+    () => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.brand).filter(Boolean))).sort()],
+    [unifiedProductRows]
+  );
+  const itemTypeOptions = useMemo(
+    () => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.itemType).filter(Boolean))).sort()],
+    [unifiedProductRows]
+  );
+  const parentOptions = useMemo(
+    () => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.parentAsin).filter(Boolean))).sort()],
+    [unifiedProductRows]
+  );
 
   const productGrouped = useMemo(() => {
     const map = new Map();
     unifiedProductRows.forEach((row) => {
       const key = `${row.adType}||${row.asin}`;
-      const current = map.get(key) || { ...row, impressions: 0, clicks: 0, spend: 0, sales: 0, orders: 0 };
+      const current = map.get(key) || {
+        ...row,
+        impressions: 0,
+        clicks: 0,
+        spend: 0,
+        sales: 0,
+        orders: 0,
+      };
       current.impressions += row.impressions;
       current.clicks += row.clicks;
       current.spend += row.spend;
@@ -662,14 +803,29 @@ export default function App() {
       current.orders += row.orders;
       map.set(key, current);
     });
-    return [...map.values()].map((row) => ({ ...row, ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0, cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0, acos: row.sales ? (row.spend / row.sales) * 100 : 0, roas: row.spend ? row.sales / row.spend : 0 }));
+    return [...map.values()].map((row) => ({
+      ...row,
+      ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
+      cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0,
+      acos: row.sales ? (row.spend / row.sales) * 100 : 0,
+      roas: row.spend ? row.sales / row.spend : 0,
+    }));
   }, [unifiedProductRows]);
 
   const parentGrouped = useMemo(() => {
     const map = new Map();
     unifiedProductRows.forEach((row) => {
       const key = `${row.adType}||${row.parentAsin || "Unmapped"}`;
-      const current = map.get(key) || { adType: row.adType, parentAsin: row.parentAsin || "Unmapped", imageUrl: row.imageUrl, impressions: 0, clicks: 0, spend: 0, sales: 0, orders: 0 };
+      const current = map.get(key) || {
+        adType: row.adType,
+        parentAsin: row.parentAsin || "Unmapped",
+        imageUrl: row.imageUrl,
+        impressions: 0,
+        clicks: 0,
+        spend: 0,
+        sales: 0,
+        orders: 0,
+      };
       current.impressions += row.impressions;
       current.clicks += row.clicks;
       current.spend += row.spend;
@@ -677,14 +833,28 @@ export default function App() {
       current.orders += row.orders;
       map.set(key, current);
     });
-    return [...map.values()].map((row) => ({ ...row, ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0, cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0, acos: row.sales ? (row.spend / row.sales) * 100 : 0, roas: row.spend ? row.sales / row.spend : 0 }));
+    return [...map.values()].map((row) => ({
+      ...row,
+      ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
+      cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0,
+      acos: row.sales ? (row.spend / row.sales) * 100 : 0,
+      roas: row.spend ? row.sales / row.spend : 0,
+    }));
   }, [unifiedProductRows]);
 
   const itemTypeGrouped = useMemo(() => {
     const map = new Map();
     unifiedProductRows.forEach((row) => {
       const key = `${row.adType}||${row.itemType || "Unmapped"}`;
-      const current = map.get(key) || { adType: row.adType, itemType: row.itemType || "Unmapped", impressions: 0, clicks: 0, spend: 0, sales: 0, orders: 0 };
+      const current = map.get(key) || {
+        adType: row.adType,
+        itemType: row.itemType || "Unmapped",
+        impressions: 0,
+        clicks: 0,
+        spend: 0,
+        sales: 0,
+        orders: 0,
+      };
       current.impressions += row.impressions;
       current.clicks += row.clicks;
       current.spend += row.spend;
@@ -692,18 +862,32 @@ export default function App() {
       current.orders += row.orders;
       map.set(key, current);
     });
-    return [...map.values()].map((row) => ({ ...row, ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0, cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0, acos: row.sales ? (row.spend / row.sales) * 100 : 0, roas: row.spend ? row.sales / row.spend : 0 }));
+    return [...map.values()].map((row) => ({
+      ...row,
+      ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
+      cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0,
+      acos: row.sales ? (row.spend / row.sales) * 100 : 0,
+      roas: row.spend ? row.sales / row.spend : 0,
+    }));
   }, [unifiedProductRows]);
 
   const adSummary = useMemo(() => {
     const spend = unifiedProductRows.reduce((sum, row) => sum + row.spend, 0);
     const sales = unifiedProductRows.reduce((sum, row) => sum + row.sales, 0);
-    return { spend, sales, acos: sales ? (spend / sales) * 100 : 0, roas: spend ? sales / spend : 0 };
+    return {
+      spend,
+      sales,
+      acos: sales ? (spend / sales) * 100 : 0,
+      roas: spend ? sales / spend : 0,
+    };
   }, [unifiedProductRows]);
 
   const adTrend = useMemo(() => {
     const top = [...productGrouped].sort((a, b) => b.sales - a.sales).slice(0, 10);
-    return top.map((row) => ({ name: row.shortTitle.length > 22 ? `${row.shortTitle.slice(0, 22)}…` : row.shortTitle, sales: row.sales }));
+    return top.map((row) => ({
+      name: row.shortTitle.length > 22 ? `${row.shortTitle.slice(0, 22)}…` : row.shortTitle,
+      sales: row.sales,
+    }));
   }, [productGrouped]);
 
   const salesByAsin30d = useMemo(() => {
@@ -717,17 +901,22 @@ export default function App() {
         itemType: row.itemType,
         imageUrl: row.imageUrl,
         sales30d: 0,
-        orders30d: 0,
       };
       current.sales30d += row.sales;
-      current.orders30d += row.orders;
       map.set(row.asin, current);
     });
     return map;
   }, [unifiedProductRows]);
 
-  const fbaInventoryRows = useMemo(() => parseInventoryRows(inventoryFbaSheet, referenceByAsin), [inventoryFbaSheet, referenceByAsin]);
-  const awdInventoryRows = useMemo(() => parseInventoryRows(inventoryAwdSheet, referenceByAsin), [inventoryAwdSheet, referenceByAsin]);
+  const fbaInventoryRows = useMemo(
+    () => parseInventoryRows(inventoryFbaSheet, referenceByAsin, "fba"),
+    [inventoryFbaSheet, referenceByAsin]
+  );
+
+  const awdInventoryRows = useMemo(
+    () => parseInventoryRows(inventoryAwdSheet, referenceByAsin, "awd"),
+    [inventoryAwdSheet, referenceByAsin]
+  );
 
   const inventoryByAsin = useMemo(() => {
     const map = new Map();
@@ -760,13 +949,20 @@ export default function App() {
       const unitsPerDay = sales30d / 30;
       const totalUnits = row.fbaUnits + row.awdUnits;
       const daysOfCover = unitsPerDay > 0 ? totalUnits / unitsPerDay : Number.POSITIVE_INFINITY;
+
       return {
         ...row,
         sales30d,
         unitsPerDay,
         totalUnits,
         daysOfCover,
-        urgency: !Number.isFinite(daysOfCover) ? "no_sales" : daysOfCover < DAYS_URGENT ? "urgent" : daysOfCover < DAYS_TO_SHIP_TARGET ? "replenish" : "healthy",
+        urgency: !Number.isFinite(daysOfCover)
+          ? "no_sales"
+          : daysOfCover < DAYS_URGENT
+          ? "urgent"
+          : daysOfCover < DAYS_TO_SHIP_TARGET
+          ? "replenish"
+          : "healthy",
       };
     });
   }, [fbaInventoryRows, awdInventoryRows, salesByAsin30d]);
@@ -774,11 +970,29 @@ export default function App() {
   const inventoryFiltered = useMemo(() => {
     return inventoryByAsin
       .filter((row) => inventoryFilter === "All" || row.urgency === inventoryFilter)
-      .filter((row) => !query || `${row.asin} ${row.shortTitle} ${row.brand} ${row.parentAsin} ${row.itemType}`.toLowerCase().includes(query.toLowerCase()));
+      .filter((row) =>
+        !query ||
+        `${row.asin} ${row.shortTitle} ${row.brand} ${row.parentAsin} ${row.itemType}`
+          .toLowerCase()
+          .includes(query.toLowerCase())
+      );
   }, [inventoryByAsin, inventoryFilter, query]);
 
-  const urgentInventory = useMemo(() => inventoryByAsin.filter((row) => row.urgency === "urgent").sort((a, b) => a.daysOfCover - b.daysOfCover), [inventoryByAsin]);
-  const replenishInventory = useMemo(() => inventoryByAsin.filter((row) => row.urgency === "replenish").sort((a, b) => a.daysOfCover - b.daysOfCover), [inventoryByAsin]);
+  const urgentInventory = useMemo(
+    () =>
+      inventoryByAsin
+        .filter((row) => row.urgency === "urgent")
+        .sort((a, b) => a.daysOfCover - b.daysOfCover),
+    [inventoryByAsin]
+  );
+
+  const replenishInventory = useMemo(
+    () =>
+      inventoryByAsin
+        .filter((row) => row.urgency === "replenish")
+        .sort((a, b) => a.daysOfCover - b.daysOfCover),
+    [inventoryByAsin]
+  );
 
   const inventorySummary = useMemo(() => {
     const totalFba = inventoryByAsin.reduce((sum, row) => sum + row.fbaUnits, 0);
@@ -786,7 +1000,9 @@ export default function App() {
     const atRisk = inventoryByAsin.filter((row) => row.daysOfCover < DAYS_TO_SHIP_TARGET).length;
     const urgent = inventoryByAsin.filter((row) => row.daysOfCover < DAYS_URGENT).length;
     const totalDailySales = inventoryByAsin.reduce((sum, row) => sum + row.unitsPerDay, 0);
-    const blendedDays = totalDailySales > 0 ? (totalFba + totalAwd) / totalDailySales : Number.POSITIVE_INFINITY;
+    const blendedDays =
+      totalDailySales > 0 ? (totalFba + totalAwd) / totalDailySales : Number.POSITIVE_INFINITY;
+
     return { totalFba, totalAwd, atRisk, urgent, blendedDays };
   }, [inventoryByAsin]);
 
@@ -818,7 +1034,21 @@ export default function App() {
 
   const productColumns = [
     { key: "adType", label: "Ad Type", type: "text" },
-    { key: "asin", label: "Product", type: "text", sortAccessor: (r) => `${r.asin} ${r.shortTitle}`, render: (r) => <div className="flex items-center gap-3"><AsinImage src={r.imageUrl} title={r.shortTitle} /><div><div className="font-medium text-cyan-300">{r.asin}</div><div className="text-xs text-slate-400">{r.shortTitle}</div></div></div> },
+    {
+      key: "asin",
+      label: "Product",
+      type: "text",
+      sortAccessor: (r) => `${r.asin} ${r.shortTitle}`,
+      render: (r) => (
+        <div className="flex items-center gap-3">
+          <AsinImage src={r.imageUrl} title={r.shortTitle} />
+          <div>
+            <div className="font-medium text-cyan-300">{r.asin}</div>
+            <div className="text-xs text-slate-400">{r.shortTitle}</div>
+          </div>
+        </div>
+      ),
+    },
     { key: "parentAsin", label: "Parent", type: "text" },
     { key: "itemType", label: "Item Type", type: "text" },
     { key: "brand", label: "Brand", type: "text" },
@@ -835,7 +1065,17 @@ export default function App() {
 
   const parentColumns = [
     { key: "adType", label: "Ad Type", type: "text" },
-    { key: "parentAsin", label: "Parent ASIN", type: "text", render: (r) => <div className="flex items-center gap-3"><AsinImage src={r.imageUrl} title={r.parentAsin} /><div className="font-medium text-cyan-300">{r.parentAsin}</div></div> },
+    {
+      key: "parentAsin",
+      label: "Parent ASIN",
+      type: "text",
+      render: (r) => (
+        <div className="flex items-center gap-3">
+          <AsinImage src={r.imageUrl} title={r.parentAsin} />
+          <div className="font-medium text-cyan-300">{r.parentAsin}</div>
+        </div>
+      ),
+    },
     { key: "impressions", label: "Impr.", type: "number", render: (r) => compactNumber(r.impressions) },
     { key: "clicks", label: "Clicks", type: "number", render: (r) => compactNumber(r.clicks) },
     { key: "spend", label: "Spend", type: "number", render: (r) => currency(r.spend) },
@@ -863,7 +1103,21 @@ export default function App() {
 
   const catalogColumns = [
     { key: "adType", label: "Ad Type", type: "text" },
-    { key: "asin", label: "Product", type: "text", sortAccessor: (r) => `${r.asin} ${r.shortTitle}`, render: (r) => <div className="flex items-center gap-3"><AsinImage src={r.imageUrl} title={r.shortTitle} /><div><div className="font-medium text-cyan-300">{r.asin}</div><div className="text-xs text-slate-400">{r.shortTitle}</div></div></div> },
+    {
+      key: "asin",
+      label: "Product",
+      type: "text",
+      sortAccessor: (r) => `${r.asin} ${r.shortTitle}`,
+      render: (r) => (
+        <div className="flex items-center gap-3">
+          <AsinImage src={r.imageUrl} title={r.shortTitle} />
+          <div>
+            <div className="font-medium text-cyan-300">{r.asin}</div>
+            <div className="text-xs text-slate-400">{r.shortTitle}</div>
+          </div>
+        </div>
+      ),
+    },
     { key: "parentAsin", label: "Parent", type: "text" },
     { key: "itemType", label: "Item Type", type: "text" },
     { key: "brand", label: "Brand", type: "text" },
@@ -874,26 +1128,72 @@ export default function App() {
   ];
 
   const inventoryColumns = [
-    { key: "asin", label: "Product", type: "text", sortAccessor: (r) => `${r.asin} ${r.shortTitle}`, render: (r) => <div className="flex items-center gap-3"><AsinImage src={r.imageUrl} title={r.shortTitle} /><div><div className="font-medium text-cyan-300">{r.asin}</div><div className="text-xs text-slate-400">{r.shortTitle}</div></div></div> },
+    {
+      key: "asin",
+      label: "Product",
+      type: "text",
+      sortAccessor: (r) => `${r.asin} ${r.shortTitle}`,
+      render: (r) => (
+        <div className="flex items-center gap-3">
+          <AsinImage src={r.imageUrl} title={r.shortTitle} />
+          <div>
+            <div className="font-medium text-cyan-300">{r.asin}</div>
+            <div className="text-xs text-slate-400">{r.shortTitle}</div>
+          </div>
+        </div>
+      ),
+    },
     { key: "brand", label: "Brand", type: "text" },
     { key: "itemType", label: "Item Type", type: "text" },
     { key: "fbaUnits", label: "FBA", type: "number", render: (r) => numberFmt(r.fbaUnits) },
     { key: "awdUnits", label: "AWD", type: "number", render: (r) => numberFmt(r.awdUnits) },
     { key: "totalUnits", label: "Total", type: "number", render: (r) => numberFmt(r.totalUnits) },
     { key: "sales30d", label: "Sales 30D", type: "number", render: (r) => currency(r.sales30d) },
-    { key: "unitsPerDay", label: "Daily Sales", type: "number", render: (r) => r.unitsPerDay ? currency(r.unitsPerDay) : "—" },
+    { key: "unitsPerDay", label: "Daily Sales", type: "number", render: (r) => (r.unitsPerDay ? currency(r.unitsPerDay) : "—") },
     { key: "daysOfCover", label: "Cover", type: "number", render: (r) => daysLabel(r.daysOfCover) },
     { key: "urgency", label: "Status", type: "text", render: (r) => urgencyPill(r.daysOfCover) },
   ];
 
-  const campaignSort = useSortableRows(unifiedCampaignRows, { key: "spend", type: "number", direction: "desc" });
-  const productSort = useSortableRows(productGrouped, { key: "spend", type: "number", direction: "desc" });
-  const parentSort = useSortableRows(parentGrouped, { key: "spend", type: "number", direction: "desc" });
-  const itemTypeSort = useSortableRows(itemTypeGrouped, { key: "spend", type: "number", direction: "desc" });
-  const catalogSort = useSortableRows(productGrouped.slice(0, 500), { key: "sales", type: "number", direction: "desc" });
-  const inventorySort = useSortableRows(inventoryFiltered, { key: "daysOfCover", type: "number", direction: "asc" });
-  const urgentSort = useSortableRows(urgentInventory, { key: "daysOfCover", type: "number", direction: "asc" });
-  const replenishSort = useSortableRows(replenishInventory, { key: "daysOfCover", type: "number", direction: "asc" });
+  const campaignSort = useSortableRows(unifiedCampaignRows, {
+    key: "spend",
+    type: "number",
+    direction: "desc",
+  });
+  const productSort = useSortableRows(productGrouped, {
+    key: "spend",
+    type: "number",
+    direction: "desc",
+  });
+  const parentSort = useSortableRows(parentGrouped, {
+    key: "spend",
+    type: "number",
+    direction: "desc",
+  });
+  const itemTypeSort = useSortableRows(itemTypeGrouped, {
+    key: "spend",
+    type: "number",
+    direction: "desc",
+  });
+  const catalogSort = useSortableRows(productGrouped.slice(0, 500), {
+    key: "sales",
+    type: "number",
+    direction: "desc",
+  });
+  const inventorySort = useSortableRows(inventoryFiltered, {
+    key: "daysOfCover",
+    type: "number",
+    direction: "asc",
+  });
+  const urgentSort = useSortableRows(urgentInventory, {
+    key: "daysOfCover",
+    type: "number",
+    direction: "asc",
+  });
+  const replenishSort = useSortableRows(replenishInventory, {
+    key: "daysOfCover",
+    type: "number",
+    direction: "asc",
+  });
 
   const tabs = [
     { id: "overview", label: "Overview", icon: DollarSign },
@@ -902,7 +1202,13 @@ export default function App() {
     { id: "catalog", label: "Catalog", icon: Package },
   ];
 
-  if (loading) return <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">Loading Google Sheets data...</div>;
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
+        Loading Google Sheets data...
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -910,7 +1216,9 @@ export default function App() {
         <aside className="border-r border-slate-900 bg-slate-950/80 p-5 backdrop-blur xl:sticky xl:top-0 xl:h-screen">
           <div className="rounded-3xl border border-slate-800 bg-slate-950 p-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border border-slate-800 bg-white p-1.5"><img src={LOGO_URL} alt="Client Logo" className="h-full w-full object-contain" /></div>
+              <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border border-slate-800 bg-white p-1.5">
+                <img src={LOGO_URL} alt="Client Logo" className="h-full w-full object-contain" />
+              </div>
               <div>
                 <p className="text-lg font-semibold text-white">Five Star Napkins</p>
                 <p className="text-sm text-slate-400">Seller Central Dashboard</p>
@@ -919,28 +1227,54 @@ export default function App() {
           </div>
 
           <div className="mt-6 space-y-2">
-            {tabs.map((tab) => <SidebarButton key={tab.id} active={activeTab === tab.id} icon={tab.icon} label={tab.label} onClick={() => setActiveTab(tab.id)} />)}
+            {tabs.map((tab) => (
+              <SidebarButton
+                key={tab.id}
+                active={activeTab === tab.id}
+                icon={tab.icon}
+                label={tab.label}
+                onClick={() => setActiveTab(tab.id)}
+              />
+            ))}
           </div>
         </aside>
 
         <main className="p-4 md:p-6 xl:p-8">
           <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-white">Five Star Napkins Dashboard</h1>
-              <p className="mt-2 text-sm text-slate-400">Seller Central only. Live from Google Sheets.</p>
+              <h1 className="text-3xl font-semibold tracking-tight text-white">
+                Five Star Napkins Dashboard
+              </h1>
+              <p className="mt-2 text-sm text-slate-400">
+                Seller Central only. Live from Google Sheets.
+              </p>
             </div>
 
             <div className="flex flex-col gap-3 md:flex-row md:items-center">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search campaign, ASIN, parent, item type..." className="w-full rounded-2xl border border-slate-800 bg-slate-950 px-10 py-3 text-sm text-white outline-none placeholder:text-slate-500 md:w-80" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search campaign, ASIN, parent, item type..."
+                  className="w-full rounded-2xl border border-slate-800 bg-slate-950 px-10 py-3 text-sm text-white outline-none placeholder:text-slate-500 md:w-80"
+                />
               </div>
 
-              <button onClick={() => window.location.reload()} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-slate-800"><RefreshCw className="h-4 w-4" /> Refresh</button>
+              <button
+                onClick={() => window.location.reload()}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-slate-800"
+              >
+                <RefreshCw className="h-4 w-4" /> Refresh
+              </button>
             </div>
           </div>
 
-          {error ? <div className="mb-6 rounded-2xl border border-rose-900 bg-rose-950/40 p-4 text-sm text-rose-200">{error}</div> : null}
+          {error ? (
+            <div className="mb-6 rounded-2xl border border-rose-900 bg-rose-950/40 p-4 text-sm text-rose-200">
+              {error}
+            </div>
+          ) : null}
 
           {activeTab === "overview" && (
             <div className="space-y-6">
@@ -957,16 +1291,38 @@ export default function App() {
                     <ResponsiveContainer>
                       <BarChart data={adTrend}>
                         <CartesianGrid stroke="#172033" vertical={false} />
-                        <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                        <YAxis stroke="#64748b" fontSize={12} tickFormatter={(v) => `$${compactNumber(v)}`} tickLine={false} axisLine={false} />
-                        <Tooltip contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: 16 }} formatter={(v) => currency(v)} />
+                        <XAxis
+                          dataKey="name"
+                          stroke="#64748b"
+                          fontSize={12}
+                          tickLine={false}
+                          axisLine={false}
+                        />
+                        <YAxis
+                          stroke="#64748b"
+                          fontSize={12}
+                          tickFormatter={(v) => `$${compactNumber(v)}`}
+                          tickLine={false}
+                          axisLine={false}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            background: "#020617",
+                            border: "1px solid #1e293b",
+                            borderRadius: 16,
+                          }}
+                          formatter={(v) => currency(v)}
+                        />
                         <Bar dataKey="sales" radius={[8, 8, 0, 0]} fill="#38bdf8" />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
                 </SectionCard>
 
-                <SectionCard title="Inventory Snapshot" subtitle="High-level stock health based on last 30 day sales run rate">
+                <SectionCard
+                  title="Inventory Snapshot"
+                  subtitle="High-level stock health based on last 30 day sales run rate"
+                >
                   <div className="grid grid-cols-2 gap-4">
                     <CountCard label="At Risk < 2 Months" value={inventorySummary.atRisk} icon={Boxes} tone="amber" />
                     <CountCard label="Urgent < 2 Weeks" value={inventorySummary.urgent} icon={AlertTriangle} tone="rose" />
@@ -987,21 +1343,73 @@ export default function App() {
                 <StatCard label="ROAS" value={adSummary.roas} suffix="x" icon={RefreshCw} />
               </div>
 
-              <SectionCard title="Advertising Performance" subtitle="Now supports Sponsored Products, Sponsored Brands, and Sponsored Display" right={<TogglePills value={adView} onChange={setAdView} options={["Campaign", "Product", "Parent", "Item Type"]} />}>
+              <SectionCard
+                title="Advertising Performance"
+                subtitle="Now supports Sponsored Products, Sponsored Brands, and Sponsored Display"
+                right={
+                  <TogglePills
+                    value={adView}
+                    onChange={setAdView}
+                    options={["Campaign", "Product", "Parent", "Item Type"]}
+                  />
+                }
+              >
                 <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
                   <FilterSelect label="Ad Type" value={adType} onChange={setAdType} options={adTypeOptions} />
                   <FilterSelect label="Brand" value={brandFilter} onChange={setBrandFilter} options={brandOptions} />
                   <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
                   <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
                   <div className="flex items-end">
-                    <button onClick={() => { setAdType("All"); setBrandFilter("All"); setItemTypeFilter("All"); setParentFilter("All"); }} className="w-full rounded-2xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm text-slate-200 transition hover:bg-slate-800">Clear filters</button>
+                    <button
+                      onClick={() => {
+                        setAdType("All");
+                        setBrandFilter("All");
+                        setItemTypeFilter("All");
+                        setParentFilter("All");
+                      }}
+                      className="w-full rounded-2xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm text-slate-200 transition hover:bg-slate-800"
+                    >
+                      Clear filters
+                    </button>
                   </div>
                 </div>
 
-                {adView === "Campaign" && <SortableTable rowKey="campaignName" columns={campaignColumns} rows={campaignSort.sortedRows} sortConfig={campaignSort.sortConfig} onSort={campaignSort.handleSort} />}
-                {adView === "Product" && <SortableTable rowKey={(row) => `${row.adType}-${row.asin}`} columns={productColumns} rows={productSort.sortedRows} sortConfig={productSort.sortConfig} onSort={productSort.handleSort} />}
-                {adView === "Parent" && <SortableTable rowKey={(row) => `${row.adType}-${row.parentAsin}`} columns={parentColumns} rows={parentSort.sortedRows} sortConfig={parentSort.sortConfig} onSort={parentSort.handleSort} />}
-                {adView === "Item Type" && <SortableTable rowKey={(row) => `${row.adType}-${row.itemType}`} columns={itemTypeColumns} rows={itemTypeSort.sortedRows} sortConfig={itemTypeSort.sortConfig} onSort={itemTypeSort.handleSort} />}
+                {adView === "Campaign" && (
+                  <SortableTable
+                    rowKey="campaignName"
+                    columns={campaignColumns}
+                    rows={campaignSort.sortedRows}
+                    sortConfig={campaignSort.sortConfig}
+                    onSort={campaignSort.handleSort}
+                  />
+                )}
+                {adView === "Product" && (
+                  <SortableTable
+                    rowKey={(row) => `${row.adType}-${row.asin}`}
+                    columns={productColumns}
+                    rows={productSort.sortedRows}
+                    sortConfig={productSort.sortConfig}
+                    onSort={productSort.handleSort}
+                  />
+                )}
+                {adView === "Parent" && (
+                  <SortableTable
+                    rowKey={(row) => `${row.adType}-${row.parentAsin}`}
+                    columns={parentColumns}
+                    rows={parentSort.sortedRows}
+                    sortConfig={parentSort.sortConfig}
+                    onSort={parentSort.handleSort}
+                  />
+                )}
+                {adView === "Item Type" && (
+                  <SortableTable
+                    rowKey={(row) => `${row.adType}-${row.itemType}`}
+                    columns={itemTypeColumns}
+                    rows={itemTypeSort.sortedRows}
+                    sortConfig={itemTypeSort.sortConfig}
+                    onSort={itemTypeSort.handleSort}
+                  />
+                )}
               </SectionCard>
             </div>
           )}
@@ -1019,17 +1427,33 @@ export default function App() {
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
                 <SectionCard title="Urgent Block" subtitle="ASINs below 2 weeks of cover need immediate attention">
                   {urgentInventory.length === 0 ? (
-                    <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">No ASINs are below 2 weeks of cover.</div>
+                    <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">
+                      No ASINs are below 2 weeks of cover.
+                    </div>
                   ) : (
-                    <SortableTable rowKey="asin" columns={inventoryColumns} rows={urgentSort.sortedRows.slice(0, 25)} sortConfig={urgentSort.sortConfig} onSort={urgentSort.handleSort} />
+                    <SortableTable
+                      rowKey="asin"
+                      columns={inventoryColumns}
+                      rows={urgentSort.sortedRows.slice(0, 25)}
+                      sortConfig={urgentSort.sortConfig}
+                      onSort={urgentSort.handleSort}
+                    />
                   )}
                 </SectionCard>
 
                 <SectionCard title="Replenishment Watch" subtitle="ASINs below 2 months of cover but above urgent threshold">
                   {replenishInventory.length === 0 ? (
-                    <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">Nothing currently falls into the watch window.</div>
+                    <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">
+                      Nothing currently falls into the watch window.
+                    </div>
                   ) : (
-                    <SortableTable rowKey="asin" columns={inventoryColumns} rows={replenishSort.sortedRows.slice(0, 25)} sortConfig={replenishSort.sortConfig} onSort={replenishSort.handleSort} />
+                    <SortableTable
+                      rowKey="asin"
+                      columns={inventoryColumns}
+                      rows={replenishSort.sortedRows.slice(0, 25)}
+                      sortConfig={replenishSort.sortConfig}
+                      onSort={replenishSort.handleSort}
+                    />
                   )}
                 </SectionCard>
               </div>
@@ -1037,12 +1461,23 @@ export default function App() {
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.25fr_1fr]">
                 <SectionCard title="Inventory Risk by ASIN" subtitle="All tracked ASINs, sortable by cover, stock, and sales">
                   <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-4">
-                    <FilterSelect label="Inventory View" value={inventoryFilter} onChange={setInventoryFilter} options={["All", "urgent", "replenish", "healthy", "no_sales"]} />
+                    <FilterSelect
+                      label="Inventory View"
+                      value={inventoryFilter}
+                      onChange={setInventoryFilter}
+                      options={["All", "urgent", "replenish", "healthy", "no_sales"]}
+                    />
                     <FilterSelect label="Brand" value={brandFilter} onChange={setBrandFilter} options={brandOptions} />
                     <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
                     <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
                   </div>
-                  <SortableTable rowKey="asin" columns={inventoryColumns} rows={inventorySort.sortedRows} sortConfig={inventorySort.sortConfig} onSort={inventorySort.handleSort} />
+                  <SortableTable
+                    rowKey="asin"
+                    columns={inventoryColumns}
+                    rows={inventorySort.sortedRows}
+                    sortConfig={inventorySort.sortConfig}
+                    onSort={inventorySort.handleSort}
+                  />
                 </SectionCard>
 
                 <SectionCard title="Lowest Cover ASINs" subtitle="Quick visual for the 12 tightest stock positions">
@@ -1051,8 +1486,23 @@ export default function App() {
                       <BarChart data={riskChartData} layout="vertical" margin={{ left: 10, right: 10 }}>
                         <CartesianGrid stroke="#172033" horizontal={false} />
                         <XAxis type="number" stroke="#64748b" tickLine={false} axisLine={false} />
-                        <YAxis type="category" dataKey="name" width={120} stroke="#64748b" tickLine={false} axisLine={false} fontSize={12} />
-                        <Tooltip contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: 16 }} formatter={(v) => daysLabel(v)} />
+                        <YAxis
+                          type="category"
+                          dataKey="name"
+                          width={120}
+                          stroke="#64748b"
+                          tickLine={false}
+                          axisLine={false}
+                          fontSize={12}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            background: "#020617",
+                            border: "1px solid #1e293b",
+                            borderRadius: 16,
+                          }}
+                          formatter={(v) => daysLabel(v)}
+                        />
                         <Bar dataKey="days" radius={[0, 8, 8, 0]} fill="#f59e0b" />
                       </BarChart>
                     </ResponsiveContainer>
@@ -1078,7 +1528,13 @@ export default function App() {
                   <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
                   <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
                 </div>
-                <SortableTable rowKey={(row) => `${row.adType}-${row.asin}`} columns={catalogColumns} rows={catalogSort.sortedRows} sortConfig={catalogSort.sortConfig} onSort={catalogSort.handleSort} />
+                <SortableTable
+                  rowKey={(row) => `${row.adType}-${row.asin}`}
+                  columns={catalogColumns}
+                  rows={catalogSort.sortedRows}
+                  sortConfig={catalogSort.sortConfig}
+                  onSort={catalogSort.handleSort}
+                />
               </SectionCard>
             </div>
           )}
