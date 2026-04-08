@@ -36,6 +36,7 @@ const TAB_NAMES = {
   itemRef: "item_data_reference",
   inventoryFba: "inventory_fba",
   inventoryAwd: "inventory_awd",
+  products30d: "products_30d",
 };
 
 const DAYS_TO_SHIP_TARGET = 60;
@@ -488,21 +489,31 @@ export default function App() {
   const [referenceSheet, setReferenceSheet] = useState([]);
   const [inventoryFbaSheet, setInventoryFbaSheet] = useState([]);
   const [inventoryAwdSheet, setInventoryAwdSheet] = useState([]);
+  const [products30dSheet, setProducts30dSheet] = useState([]);
 
   useEffect(() => {
     async function load() {
       try {
         setLoading(true);
-        const [spCampaigns, spProducts, sbCampaigns, sdCampaigns, reference, fba, awd] =
-          await Promise.all([
-            fetchSheet(TAB_NAMES.spCampaigns),
-            fetchSheet(TAB_NAMES.spProducts),
-            fetchSheet(TAB_NAMES.sbCampaigns),
-            fetchSheet(TAB_NAMES.sdCampaigns),
-            fetchSheet(TAB_NAMES.itemRef),
-            fetchSheet(TAB_NAMES.inventoryFba),
-            fetchSheet(TAB_NAMES.inventoryAwd),
-          ]);
+        const [
+          spCampaigns,
+          spProducts,
+          sbCampaigns,
+          sdCampaigns,
+          reference,
+          fba,
+          awd,
+          products30d,
+        ] = await Promise.all([
+          fetchSheet(TAB_NAMES.spCampaigns),
+          fetchSheet(TAB_NAMES.spProducts),
+          fetchSheet(TAB_NAMES.sbCampaigns),
+          fetchSheet(TAB_NAMES.sdCampaigns),
+          fetchSheet(TAB_NAMES.itemRef),
+          fetchSheet(TAB_NAMES.inventoryFba),
+          fetchSheet(TAB_NAMES.inventoryAwd),
+          fetchSheet(TAB_NAMES.products30d),
+        ]);
 
         setSpCampaignSheet(spCampaigns);
         setSpProductSheet(spProducts);
@@ -511,6 +522,7 @@ export default function App() {
         setReferenceSheet(reference);
         setInventoryFbaSheet(fba);
         setInventoryAwdSheet(awd);
+        setProducts30dSheet(products30d);
         setError("");
       } catch {
         setError(
@@ -892,21 +904,38 @@ export default function App() {
 
   const salesByAsin30d = useMemo(() => {
     const map = new Map();
-    unifiedProductRows.forEach((row) => {
-      const current = map.get(row.asin) || {
-        asin: row.asin,
-        shortTitle: row.shortTitle,
-        brand: row.brand,
-        parentAsin: row.parentAsin,
-        itemType: row.itemType,
-        imageUrl: row.imageUrl,
-        sales30d: 0,
+
+    products30dSheet.forEach((row) => {
+      const asin = normalizeText(
+        pick(row, ["ASIN", "asin", "child asin", "Child ASIN"], "")
+      ).toUpperCase();
+
+      if (!asin) return;
+
+      const ref = referenceByAsin.get(asin) || {};
+
+      const unitsOrdered = normalizeNumber(
+        pick(row, ["Units Ordered", "units ordered", "Ordered Product Sales Units"], 0)
+      );
+
+      const current = map.get(asin) || {
+        asin,
+        shortTitle: ref.shortTitle || asin,
+        brand: ref.brand || "",
+        parentAsin: ref.parentAsin || "",
+        itemType: ref.type || "",
+        imageUrl:
+          ref.imageUrl ||
+          `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
+        units30d: 0,
       };
-      current.sales30d += row.sales;
-      map.set(row.asin, current);
+
+      current.units30d += unitsOrdered;
+      map.set(asin, current);
     });
+
     return map;
-  }, [unifiedProductRows]);
+  }, [products30dSheet, referenceByAsin]);
 
   const fbaInventoryRows = useMemo(
     () => parseInventoryRows(inventoryFbaSheet, referenceByAsin, "fba"),
@@ -945,14 +974,14 @@ export default function App() {
 
     return [...map.values()].map((row) => {
       const salesRef = salesByAsin30d.get(row.asin) || {};
-      const sales30d = normalizeNumber(salesRef.sales30d);
-      const unitsPerDay = sales30d / 30;
+      const units30d = normalizeNumber(salesRef.units30d);
+      const unitsPerDay = units30d / 30;
       const totalUnits = row.fbaUnits + row.awdUnits;
       const daysOfCover = unitsPerDay > 0 ? totalUnits / unitsPerDay : Number.POSITIVE_INFINITY;
 
       return {
         ...row,
-        sales30d,
+        units30d,
         unitsPerDay,
         totalUnits,
         daysOfCover,
@@ -970,11 +999,12 @@ export default function App() {
   const inventoryFiltered = useMemo(() => {
     return inventoryByAsin
       .filter((row) => inventoryFilter === "All" || row.urgency === inventoryFilter)
-      .filter((row) =>
-        !query ||
-        `${row.asin} ${row.shortTitle} ${row.brand} ${row.parentAsin} ${row.itemType}`
-          .toLowerCase()
-          .includes(query.toLowerCase())
+      .filter(
+        (row) =>
+          !query ||
+          `${row.asin} ${row.shortTitle} ${row.brand} ${row.parentAsin} ${row.itemType}`
+            .toLowerCase()
+            .includes(query.toLowerCase())
       );
   }, [inventoryByAsin, inventoryFilter, query]);
 
@@ -1148,8 +1178,8 @@ export default function App() {
     { key: "fbaUnits", label: "FBA", type: "number", render: (r) => numberFmt(r.fbaUnits) },
     { key: "awdUnits", label: "AWD", type: "number", render: (r) => numberFmt(r.awdUnits) },
     { key: "totalUnits", label: "Total", type: "number", render: (r) => numberFmt(r.totalUnits) },
-    { key: "sales30d", label: "Sales 30D", type: "number", render: (r) => currency(r.sales30d) },
-    { key: "unitsPerDay", label: "Daily Sales", type: "number", render: (r) => (r.unitsPerDay ? currency(r.unitsPerDay) : "—") },
+    { key: "units30d", label: "Units 30D", type: "number", render: (r) => numberFmt(r.units30d) },
+    { key: "unitsPerDay", label: "Units/Day", type: "number", render: (r) => (r.unitsPerDay ? r.unitsPerDay.toFixed(2) : "—") },
     { key: "daysOfCover", label: "Cover", type: "number", render: (r) => daysLabel(r.daysOfCover) },
     { key: "urgency", label: "Status", type: "text", render: (r) => urgencyPill(r.daysOfCover) },
   ];
@@ -1321,13 +1351,33 @@ export default function App() {
 
                 <SectionCard
                   title="Inventory Snapshot"
-                  subtitle="High-level stock health based on last 30 day sales run rate"
+                  subtitle="High-level stock health based on 30 day unit velocity"
                 >
                   <div className="grid grid-cols-2 gap-4">
-                    <CountCard label="At Risk < 2 Months" value={inventorySummary.atRisk} icon={Boxes} tone="amber" />
-                    <CountCard label="Urgent < 2 Weeks" value={inventorySummary.urgent} icon={AlertTriangle} tone="rose" />
-                    <CountCard label="FBA Units" value={inventorySummary.totalFba} icon={Warehouse} tone="cyan" />
-                    <CountCard label="AWD Units" value={inventorySummary.totalAwd} icon={Truck} tone="emerald" />
+                    <CountCard
+                      label="At Risk < 2 Months"
+                      value={inventorySummary.atRisk}
+                      icon={Boxes}
+                      tone="amber"
+                    />
+                    <CountCard
+                      label="Urgent < 2 Weeks"
+                      value={inventorySummary.urgent}
+                      icon={AlertTriangle}
+                      tone="rose"
+                    />
+                    <CountCard
+                      label="FBA Units"
+                      value={inventorySummary.totalFba}
+                      icon={Warehouse}
+                      tone="cyan"
+                    />
+                    <CountCard
+                      label="AWD Units"
+                      value={inventorySummary.totalAwd}
+                      icon={Truck}
+                      tone="emerald"
+                    />
                   </div>
                 </SectionCard>
               </div>
@@ -1417,15 +1467,44 @@ export default function App() {
           {activeTab === "inventory" && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-                <CountCard label="Blended Cover" value={inventorySummary.blendedDays} suffix="count" icon={Clock3} tone="cyan" />
-                <CountCard label="At Risk < 60d" value={inventorySummary.atRisk} icon={Boxes} tone="amber" />
-                <CountCard label="Urgent < 14d" value={inventorySummary.urgent} icon={AlertTriangle} tone="rose" />
-                <CountCard label="FBA Units" value={inventorySummary.totalFba} icon={Warehouse} tone="cyan" />
-                <CountCard label="AWD Units" value={inventorySummary.totalAwd} icon={Truck} tone="emerald" />
+                <CountCard
+                  label="Blended Cover"
+                  value={inventorySummary.blendedDays}
+                  suffix="count"
+                  icon={Clock3}
+                  tone="cyan"
+                />
+                <CountCard
+                  label="At Risk < 60d"
+                  value={inventorySummary.atRisk}
+                  icon={Boxes}
+                  tone="amber"
+                />
+                <CountCard
+                  label="Urgent < 14d"
+                  value={inventorySummary.urgent}
+                  icon={AlertTriangle}
+                  tone="rose"
+                />
+                <CountCard
+                  label="FBA Units"
+                  value={inventorySummary.totalFba}
+                  icon={Warehouse}
+                  tone="cyan"
+                />
+                <CountCard
+                  label="AWD Units"
+                  value={inventorySummary.totalAwd}
+                  icon={Truck}
+                  tone="emerald"
+                />
               </div>
 
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                <SectionCard title="Urgent Block" subtitle="ASINs below 2 weeks of cover need immediate attention">
+                <SectionCard
+                  title="Urgent Block"
+                  subtitle="ASINs below 2 weeks of cover need immediate attention"
+                >
                   {urgentInventory.length === 0 ? (
                     <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">
                       No ASINs are below 2 weeks of cover.
@@ -1441,7 +1520,10 @@ export default function App() {
                   )}
                 </SectionCard>
 
-                <SectionCard title="Replenishment Watch" subtitle="ASINs below 2 months of cover but above urgent threshold">
+                <SectionCard
+                  title="Replenishment Watch"
+                  subtitle="ASINs below 2 months of cover but above urgent threshold"
+                >
                   {replenishInventory.length === 0 ? (
                     <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">
                       Nothing currently falls into the watch window.
@@ -1459,7 +1541,10 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.25fr_1fr]">
-                <SectionCard title="Inventory Risk by ASIN" subtitle="All tracked ASINs, sortable by cover, stock, and sales">
+                <SectionCard
+                  title="Inventory Risk by ASIN"
+                  subtitle="All tracked ASINs, sortable by cover, stock, and sales"
+                >
                   <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-4">
                     <FilterSelect
                       label="Inventory View"
@@ -1471,6 +1556,7 @@ export default function App() {
                     <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
                     <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
                   </div>
+
                   <SortableTable
                     rowKey="asin"
                     columns={inventoryColumns}
@@ -1480,7 +1566,10 @@ export default function App() {
                   />
                 </SectionCard>
 
-                <SectionCard title="Lowest Cover ASINs" subtitle="Quick visual for the 12 tightest stock positions">
+                <SectionCard
+                  title="Lowest Cover ASINs"
+                  subtitle="Quick visual for the 12 tightest stock positions"
+                >
                   <div className="h-96 w-full">
                     <ResponsiveContainer>
                       <BarChart data={riskChartData} layout="vertical" margin={{ left: 10, right: 10 }}>
