@@ -2071,34 +2071,7 @@ export default function App() {
                   />
                 </SectionCard>
 
-                <SectionCard title="Lowest Cover ASINs" subtitle="Quick visual for the 12 tightest stock positions">
-                  <div className="h-96 w-full">
-                    <ResponsiveContainer>
-                      <BarChart data={riskChartData} layout="vertical" margin={{ left: 10, right: 10 }}>
-                        <CartesianGrid stroke="#172033" horizontal={false} />
-                        <XAxis type="number" stroke="#64748b" tickLine={false} axisLine={false} />
-                        <YAxis
-                          type="category"
-                          dataKey="name"
-                          width={120}
-                          stroke="#64748b"
-                          tickLine={false}
-                          axisLine={false}
-                          fontSize={12}
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            background: "#020617",
-                            border: "1px solid #1e293b",
-                            borderRadius: 16,
-                          }}
-                          formatter={(v) => daysLabel(v)}
-                        />
-                        <Bar dataKey="days" radius={[0, 8, 8, 0]} fill="#f59e0b" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </SectionCard>
+
               </div>
             </div>
           )}
