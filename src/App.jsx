@@ -902,40 +902,40 @@ export default function App() {
     }));
   }, [productGrouped]);
 
-  const salesByAsin30d = useMemo(() => {
-    const map = new Map();
+const salesByAsin30d = useMemo(() => {
+  const map = new Map();
 
-    products30dSheet.forEach((row) => {
-      const asin = normalizeText(
-        pick(row, ["ASIN", "asin", "child asin", "Child ASIN"], "")
-      ).toUpperCase();
+  products30dSheet.forEach((row) => {
+    const asin = normalizeText(
+      pick(row, ["(Child) ASIN", "Child ASIN", "child asin", "ASIN", "asin"], "")
+    ).toUpperCase();
 
-      if (!asin) return;
+    if (!asin) return;
 
-      const ref = referenceByAsin.get(asin) || {};
+    const ref = referenceByAsin.get(asin) || {};
 
-      const unitsOrdered = normalizeNumber(
-        pick(row, ["Units Ordered", "units ordered", "Ordered Product Sales Units"], 0)
-      );
+    const unitsOrdered = normalizeNumber(
+      pick(row, ["Units Ordered", "units ordered", "Ordered Product Sales Units"], 0)
+    );
 
-      const current = map.get(asin) || {
-        asin,
-        shortTitle: ref.shortTitle || asin,
-        brand: ref.brand || "",
-        parentAsin: ref.parentAsin || "",
-        itemType: ref.type || "",
-        imageUrl:
-          ref.imageUrl ||
-          `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
-        units30d: 0,
-      };
+    const current = map.get(asin) || {
+      asin,
+      shortTitle: ref.shortTitle || asin,
+      brand: ref.brand || "",
+      parentAsin: ref.parentAsin || "",
+      itemType: ref.type || "",
+      imageUrl:
+        ref.imageUrl ||
+        `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
+      units30d: 0,
+    };
 
-      current.units30d += unitsOrdered;
-      map.set(asin, current);
-    });
+    current.units30d += unitsOrdered;
+    map.set(asin, current);
+  });
 
-    return map;
-  }, [products30dSheet, referenceByAsin]);
+  return map;
+}, [products30dSheet, referenceByAsin]);
 
   const fbaInventoryRows = useMemo(
     () => parseInventoryRows(inventoryFbaSheet, referenceByAsin, "fba"),
