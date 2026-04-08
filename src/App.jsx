@@ -423,20 +423,9 @@ function parseInventoryRows(rows, referenceByAsin, channel) {
       let units = 0;
 
       if (channel === "fba") {
-        const fulfillable = normalizeNumber(
-          pick(row, ["afn-fulfillable-quantity", "AFN Fulfillable Quantity"], 0)
-        );
-        const inboundWorking = normalizeNumber(
-          pick(row, ["afn-inbound-working-quantity", "AFN Inbound Working Quantity"], 0)
-        );
-        const inboundShipped = normalizeNumber(
-          pick(row, ["afn-inbound-shipped-quantity", "AFN Inbound Shipped Quantity"], 0)
-        );
-        const inboundReceiving = normalizeNumber(
-          pick(row, ["afn-inbound-receiving-quantity", "AFN Inbound Receiving Quantity"], 0)
-        );
-
-        units = fulfillable + inboundWorking + inboundShipped + inboundReceiving;
+        units = normalizeNumber(
+  pick(row, ["afn-total-quantity", "AFN Total Quantity"], 0)
+);
       } else if (channel === "awd") {
         const available = normalizeNumber(
           pick(row, ["Available in AWD (units)", "available in awd (units)"], 0)
