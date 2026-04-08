@@ -27,14 +27,11 @@ const LOGO_URL = "/logo.png";
 const TAB_NAMES = {
   spCampaigns: "Sponsored Products Campaigns",
   spProducts: "Products_Ad_Report",
+  sbCampaigns: "Sponsored Brands Campaigns",
+  sdCampaigns: "Sponsored Display Campaigns",
   itemRef: "item_data_reference",
   inventoryFba: "inventory_fba",
   inventoryAwd: "inventory_awd",
-  // Add these later if/when you create them:
-  // sbCampaigns: "Sponsored Brands Campaigns",
-  // sbProducts: "Sponsored Brands Product Report",
-  // sdCampaigns: "Sponsored Display Campaigns",
-  // sdProducts: "Sponsored Display Product Report",
 };
 
 function cn(...classes) {
@@ -109,10 +106,16 @@ function compactNumber(value) {
   return `${Math.round(n)}`;
 }
 
-function extractAsin(productField) {
-  const text = normalizeText(productField).toUpperCase();
-  const match = text.match(/^([A-Z0-9]{10})/);
+function extractAsin(text) {
+  const normalized = normalizeText(text).toUpperCase();
+  const match = normalized.match(/([A-Z0-9]{10})/);
   return match ? match[1] : "";
+}
+
+function extractAsins(text) {
+  const normalized = normalizeText(text).toUpperCase();
+  const matches = normalized.match(/[A-Z0-9]{10}/g);
+  return matches ? Array.from(new Set(matches)) : [];
 }
 
 function inferImageUrl(row) {
@@ -376,6 +379,8 @@ export default function App() {
 
   const [spCampaignSheet, setSpCampaignSheet] = useState([]);
   const [spProductSheet, setSpProductSheet] = useState([]);
+  const [sbCampaignSheet, setSbCampaignSheet] = useState([]);
+  const [sdCampaignSheet, setSdCampaignSheet] = useState([]);
   const [referenceSheet, setReferenceSheet] = useState([]);
   const [inventoryFbaSheet, setInventoryFbaSheet] = useState([]);
   const [inventoryAwdSheet, setInventoryAwdSheet] = useState([]);
@@ -384,15 +389,28 @@ export default function App() {
     async function load() {
       try {
         setLoading(true);
-        const [spCampaigns, spProducts, reference, fba, awd] = await Promise.all([
+        const [
+          spCampaigns,
+          spProducts,
+          sbCampaigns,
+          sdCampaigns,
+          reference,
+          fba,
+          awd,
+        ] = await Promise.all([
           fetchSheet(TAB_NAMES.spCampaigns),
           fetchSheet(TAB_NAMES.spProducts),
+          fetchSheet(TAB_NAMES.sbCampaigns),
+          fetchSheet(TAB_NAMES.sdCampaigns),
           fetchSheet(TAB_NAMES.itemRef),
           fetchSheet(TAB_NAMES.inventoryFba),
           fetchSheet(TAB_NAMES.inventoryAwd),
         ]);
+
         setSpCampaignSheet(spCampaigns);
         setSpProductSheet(spProducts);
+        setSbCampaignSheet(sbCampaigns);
+        setSdCampaignSheet(sdCampaigns);
         setReferenceSheet(reference);
         setInventoryFbaSheet(fba);
         setInventoryAwdSheet(awd);
@@ -454,7 +472,61 @@ export default function App() {
         };
       });
 
-    return sp
+    const sb = sbCampaignSheet
+      .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
+      .map((row) => {
+        const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
+        const sales = normalizeNumber(
+          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "14 Day Total Sales"])
+        );
+        const clicks = normalizeNumber(pick(row, ["Clicks"]));
+        const impressions = normalizeNumber(pick(row, ["Impressions"]));
+        const orders = normalizeNumber(pick(row, ["Orders", "Orders (#)"]));
+        return {
+          adType: "Sponsored Brands",
+          campaignName: normalizeText(pick(row, ["Campaign Name", "Campaign"])),
+          state: normalizeText(pick(row, ["State", "Status"], "—")),
+          campaignType: "SB",
+          impressions,
+          clicks,
+          spend,
+          sales,
+          orders,
+          ctr: impressions ? (clicks / impressions) * 100 : 0,
+          acos: sales ? (spend / sales) * 100 : 0,
+          roas: spend ? sales / spend : 0,
+          creativeAsins: normalizeText(pick(row, ["Creative ASINs"], "")),
+          landingPageUrl: normalizeText(pick(row, ["Landing Page URL"], "")),
+        };
+      });
+
+    const sd = sdCampaignSheet
+      .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
+      .map((row) => {
+        const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
+        const sales = normalizeNumber(
+          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 14 Day Total Sales"])
+        );
+        const clicks = normalizeNumber(pick(row, ["Clicks"]));
+        const impressions = normalizeNumber(pick(row, ["Impressions"]));
+        const orders = normalizeNumber(pick(row, ["Orders"]));
+        return {
+          adType: "Sponsored Display",
+          campaignName: normalizeText(pick(row, ["Campaign Name", "Campaign"])),
+          state: normalizeText(pick(row, ["State", "Status"], "—")),
+          campaignType: "SD",
+          impressions,
+          clicks,
+          spend,
+          sales,
+          orders,
+          ctr: impressions ? (clicks / impressions) * 100 : 0,
+          acos: sales ? (spend / sales) * 100 : 0,
+          roas: spend ? sales / spend : 0,
+        };
+      });
+
+    return [...sp, ...sb, ...sd]
       .filter((row) => adType === "All" || row.adType === adType)
       .filter(
         (row) =>
@@ -463,10 +535,10 @@ export default function App() {
             .toLowerCase()
             .includes(query.toLowerCase())
       );
-  }, [spCampaignSheet, adType, query]);
+  }, [spCampaignSheet, sbCampaignSheet, sdCampaignSheet, adType, query]);
 
-  const unifiedProductRows = useMemo(() => {
-    const sp = spProductSheet
+  const spProductRows = useMemo(() => {
+    return spProductSheet
       .map((row) => {
         const asin = extractAsin(pick(row, ["Products", "Product", "products"], ""));
         const ref = referenceByAsin.get(asin) || {};
@@ -497,8 +569,98 @@ export default function App() {
         };
       })
       .filter((row) => row.asin);
+  }, [spProductSheet, referenceByAsin]);
 
-    return sp
+  const sbProductRows = useMemo(() => {
+    const rows = [];
+    sbCampaignSheet
+      .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
+      .forEach((row) => {
+        const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
+        const sales = normalizeNumber(
+          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "14 Day Total Sales"])
+        );
+        const clicks = normalizeNumber(pick(row, ["Clicks"]));
+        const impressions = normalizeNumber(pick(row, ["Impressions"]));
+        const orders = normalizeNumber(pick(row, ["Orders", "Orders (#)"]));
+        const campaignName = normalizeText(pick(row, ["Campaign Name", "Campaign"]));
+        const asins = [
+          ...extractAsins(pick(row, ["Creative ASINs"], "")),
+          ...extractAsins(pick(row, ["Landing Page URL"], "")),
+        ];
+        const uniqueAsins = Array.from(new Set(asins)).filter(Boolean);
+        if (!uniqueAsins.length) return;
+
+        const divisor = uniqueAsins.length;
+        uniqueAsins.forEach((asin) => {
+          const ref = referenceByAsin.get(asin) || {};
+          rows.push({
+            adType: "Sponsored Brands",
+            campaignName,
+            asin,
+            parentAsin: ref.parentAsin || "",
+            itemType: ref.type || "",
+            brand: ref.brand || "",
+            shortTitle: ref.shortTitle || asin,
+            imageUrl:
+              ref.imageUrl ||
+              `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
+            impressions: impressions / divisor,
+            clicks: clicks / divisor,
+            spend: spend / divisor,
+            sales: sales / divisor,
+            orders: orders / divisor,
+            ctr: impressions ? (clicks / impressions) * 100 : 0,
+            cvr: clicks ? (orders / clicks) * 100 : 0,
+            acos: sales ? (spend / sales) * 100 : 0,
+            roas: spend ? sales / spend : 0,
+          });
+        });
+      });
+
+    return rows;
+  }, [sbCampaignSheet, referenceByAsin]);
+
+  const sdProductRows = useMemo(() => {
+    return sdCampaignSheet
+      .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
+      .map((row) => {
+        const asin =
+          extractAsin(pick(row, ["Promoted ASIN", "ASIN", "Advertised ASIN", "Product"], "")) || "";
+        const ref = referenceByAsin.get(asin) || {};
+        const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
+        const sales = normalizeNumber(
+          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 14 Day Total Sales"])
+        );
+        const clicks = normalizeNumber(pick(row, ["Clicks"]));
+        const impressions = normalizeNumber(pick(row, ["Impressions"]));
+        const orders = normalizeNumber(pick(row, ["Orders"]));
+        return {
+          adType: "Sponsored Display",
+          asin,
+          parentAsin: ref.parentAsin || "",
+          itemType: ref.type || "",
+          brand: ref.brand || "",
+          shortTitle: ref.shortTitle || asin || normalizeText(pick(row, ["Campaign Name"], "Display Campaign")),
+          imageUrl:
+            ref.imageUrl ||
+            (asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg` : ""),
+          impressions,
+          clicks,
+          spend,
+          sales,
+          orders,
+          ctr: impressions ? (clicks / impressions) * 100 : 0,
+          cvr: clicks ? (orders / clicks) * 100 : 0,
+          acos: sales ? (spend / sales) * 100 : 0,
+          roas: spend ? sales / spend : 0,
+        };
+      })
+      .filter((row) => row.asin);
+  }, [sdCampaignSheet, referenceByAsin]);
+
+  const unifiedProductRows = useMemo(() => {
+    return [...spProductRows, ...sbProductRows, ...sdProductRows]
       .filter((row) => adType === "All" || row.adType === adType)
       .filter((row) => brandFilter === "All" || row.brand === brandFilter)
       .filter((row) => itemTypeFilter === "All" || row.itemType === itemTypeFilter)
@@ -510,7 +672,7 @@ export default function App() {
             .toLowerCase()
             .includes(query.toLowerCase())
       );
-  }, [spProductSheet, referenceByAsin, adType, brandFilter, itemTypeFilter, parentFilter, query]);
+  }, [spProductRows, sbProductRows, sdProductRows, adType, brandFilter, itemTypeFilter, parentFilter, query]);
 
   const brandOptions = useMemo(
     () => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.brand).filter(Boolean))).sort()],
@@ -528,7 +690,8 @@ export default function App() {
   const productGrouped = useMemo(() => {
     const map = new Map();
     unifiedProductRows.forEach((row) => {
-      const current = map.get(row.asin) || {
+      const key = `${row.adType}||${row.asin}`;
+      const current = map.get(key) || {
         ...row,
         impressions: 0,
         clicks: 0,
@@ -541,7 +704,7 @@ export default function App() {
       current.spend += row.spend;
       current.sales += row.sales;
       current.orders += row.orders;
-      map.set(row.asin, current);
+      map.set(key, current);
     });
     return [...map.values()].map((row) => ({
       ...row,
@@ -555,9 +718,10 @@ export default function App() {
   const parentGrouped = useMemo(() => {
     const map = new Map();
     unifiedProductRows.forEach((row) => {
-      const key = row.parentAsin || "Unmapped";
+      const key = `${row.adType}||${row.parentAsin || "Unmapped"}`;
       const current = map.get(key) || {
-        parentAsin: key,
+        adType: row.adType,
+        parentAsin: row.parentAsin || "Unmapped",
         imageUrl: row.imageUrl,
         impressions: 0,
         clicks: 0,
@@ -584,9 +748,10 @@ export default function App() {
   const itemTypeGrouped = useMemo(() => {
     const map = new Map();
     unifiedProductRows.forEach((row) => {
-      const key = row.itemType || "Unmapped";
+      const key = `${row.adType}||${row.itemType || "Unmapped"}`;
       const current = map.get(key) || {
-        itemType: key,
+        adType: row.adType,
+        itemType: row.itemType || "Unmapped",
         impressions: 0,
         clicks: 0,
         spend: 0,
@@ -624,7 +789,6 @@ export default function App() {
     const top = [...productGrouped].sort((a, b) => b.sales - a.sales).slice(0, 10);
     return top.map((row) => ({
       name: row.shortTitle.length > 22 ? `${row.shortTitle.slice(0, 22)}…` : row.shortTitle,
-      spend: row.spend,
       sales: row.sales,
     }));
   }, [productGrouped]);
@@ -676,6 +840,7 @@ export default function App() {
   ];
 
   const parentColumns = [
+    { key: "adType", label: "Ad Type", type: "text" },
     {
       key: "parentAsin",
       label: "Parent ASIN",
@@ -699,6 +864,7 @@ export default function App() {
   ];
 
   const itemTypeColumns = [
+    { key: "adType", label: "Ad Type", type: "text" },
     { key: "itemType", label: "Item Type", type: "text" },
     { key: "impressions", label: "Impr.", type: "number", render: (r) => compactNumber(r.impressions) },
     { key: "clicks", label: "Clicks", type: "number", render: (r) => compactNumber(r.clicks) },
@@ -910,7 +1076,7 @@ export default function App() {
 
               <SectionCard
                 title="Advertising Performance"
-                subtitle="Ad type selector supports SP now and is ready for SB/SD once those tabs are added"
+                subtitle="Now supports Sponsored Products, Sponsored Brands, and Sponsored Display"
                 right={
                   <TogglePills
                     value={adView}
@@ -950,7 +1116,7 @@ export default function App() {
                 )}
                 {adView === "Product" && (
                   <SortableTable
-                    rowKey="asin"
+                    rowKey={(row) => `${row.adType}-${row.asin}`}
                     columns={productColumns}
                     rows={productSort.sortedRows}
                     sortConfig={productSort.sortConfig}
@@ -959,7 +1125,7 @@ export default function App() {
                 )}
                 {adView === "Parent" && (
                   <SortableTable
-                    rowKey="parentAsin"
+                    rowKey={(row) => `${row.adType}-${row.parentAsin}`}
                     columns={parentColumns}
                     rows={parentSort.sortedRows}
                     sortConfig={parentSort.sortConfig}
@@ -968,7 +1134,7 @@ export default function App() {
                 )}
                 {adView === "Item Type" && (
                   <SortableTable
-                    rowKey="itemType"
+                    rowKey={(row) => `${row.adType}-${row.itemType}`}
                     columns={itemTypeColumns}
                     rows={itemTypeSort.sortedRows}
                     sortConfig={itemTypeSort.sortConfig}
@@ -1006,7 +1172,7 @@ export default function App() {
                 </div>
 
                 <SortableTable
-                  rowKey="asin"
+                  rowKey={(row) => `${row.adType}-${row.asin}`}
                   columns={catalogColumns}
                   rows={catalogSort.sortedRows}
                   sortConfig={catalogSort.sortConfig}
