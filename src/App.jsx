@@ -17,6 +17,9 @@ import {
   ShieldMinus,
   BadgeDollarSign,
   Ban,
+  TrendingUp,
+  TrendingDown,
+  LineChart as LineChartIcon,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -26,6 +29,8 @@ import {
   XAxis,
   YAxis,
   Tooltip,
+  LineChart,
+  Line,
 } from "recharts";
 
 const SHEET_ID = "1KA0mswUxULOvwUdyfnd67k1dKbCUh1-9USOL2cDJC9A";
@@ -42,6 +47,7 @@ const TAB_NAMES = {
   inventoryFba: "inventory_fba",
   inventoryAwd: "inventory_awd",
   products30d: "products_30d",
+  salesMonthly: "sales_monthly",
 };
 
 const DAYS_TO_SHIP_TARGET = 60;
@@ -329,21 +335,56 @@ function StatCard({ label, value, suffix, icon: Icon, tone = "cyan" }) {
   );
 }
 
+function ComparisonCard({ title, value, positive, subtitle }) {
+  return (
+    <div className="rounded-3xl border border-slate-800 bg-slate-950 p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{title}</p>
+          <p
+            className={cn(
+              "mt-2 text-3xl font-semibold",
+              positive === null ? "text-white" : positive ? "text-emerald-300" : "text-rose-300"
+            )}
+          >
+            {value}
+          </p>
+          {subtitle ? <p className="mt-2 text-sm text-slate-400">{subtitle}</p> : null}
+        </div>
+        <div
+          className={cn(
+            "rounded-2xl border border-slate-800 bg-slate-900 p-3",
+            positive === null ? "text-slate-300" : positive ? "text-emerald-300" : "text-rose-300"
+          )}
+        >
+          {positive === null ? (
+            <LineChartIcon className="h-5 w-5" />
+          ) : positive ? (
+            <TrendingUp className="h-5 w-5" />
+          ) : (
+            <TrendingDown className="h-5 w-5" />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CountCard({ label, value, suffix = "count", icon: Icon, tone = "cyan" }) {
   return <StatCard label={label} value={value} suffix={suffix} icon={Icon} tone={tone} />;
 }
 
 function SectionCard({ title, subtitle, children, right }) {
   return (
-    <div className="rounded-3xl border border-slate-800 bg-slate-950 p-5">
+    <div className="min-w-0 rounded-3xl border border-slate-800 bg-slate-950 p-5">
       <div className="mb-5 flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <h3 className="text-lg font-semibold text-white">{title}</h3>
           {subtitle ? <p className="mt-1 text-sm text-slate-400">{subtitle}</p> : null}
         </div>
         {right}
       </div>
-      {children}
+      <div className="min-w-0">{children}</div>
     </div>
   );
 }
@@ -445,8 +486,12 @@ function parseInventoryRows(rows, referenceByAsin, channel) {
       if (channel === "fba") {
         units = normalizeNumber(pick(row, ["afn-total-quantity", "AFN Total Quantity"], 0));
       } else if (channel === "awd") {
-        const available = normalizeNumber(pick(row, ["Available in AWD (units)", "available in awd (units)"], 0));
-        const inbound = normalizeNumber(pick(row, ["Inbound to AWD (units)", "inbound to awd (units)"], 0));
+        const available = normalizeNumber(
+          pick(row, ["Available in AWD (units)", "available in awd (units)"], 0)
+        );
+        const inbound = normalizeNumber(
+          pick(row, ["Inbound to AWD (units)", "inbound to awd (units)"], 0)
+        );
         units = available + inbound;
       }
 
@@ -466,6 +511,19 @@ function parseInventoryRows(rows, referenceByAsin, channel) {
       };
     })
     .filter((row) => row.asin || row.units > 0);
+}
+
+function percentChange(current, prior) {
+  const c = normalizeNumber(current);
+  const p = normalizeNumber(prior);
+  if (p === 0) return null;
+  return ((c - p) / p) * 100;
+}
+
+function monthLabel(dateValue) {
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return normalizeText(dateValue);
+  return d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
 }
 
 export default function App() {
@@ -491,6 +549,7 @@ export default function App() {
   const [inventoryFbaSheet, setInventoryFbaSheet] = useState([]);
   const [inventoryAwdSheet, setInventoryAwdSheet] = useState([]);
   const [products30dSheet, setProducts30dSheet] = useState([]);
+  const [salesMonthlySheet, setSalesMonthlySheet] = useState([]);
 
   useEffect(() => {
     async function load() {
@@ -507,6 +566,7 @@ export default function App() {
           fba,
           awd,
           products30d,
+          salesMonthly,
         ] = await Promise.all([
           fetchSheet(TAB_NAMES.spCampaigns),
           fetchSheet(TAB_NAMES.spProducts),
@@ -518,6 +578,7 @@ export default function App() {
           fetchSheet(TAB_NAMES.inventoryFba),
           fetchSheet(TAB_NAMES.inventoryAwd),
           fetchSheet(TAB_NAMES.products30d),
+          fetchSheet(TAB_NAMES.salesMonthly),
         ]);
 
         setSpCampaignSheet(spCampaigns);
@@ -530,6 +591,7 @@ export default function App() {
         setInventoryFbaSheet(fba);
         setInventoryAwdSheet(awd);
         setProducts30dSheet(products30d);
+        setSalesMonthlySheet(salesMonthly);
         setError("");
       } catch {
         setError(
@@ -566,7 +628,9 @@ export default function App() {
       .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
       .map((row) => {
         const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
-        const sales = normalizeNumber(pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 7 Day Total Sales"]));
+        const sales = normalizeNumber(
+          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 7 Day Total Sales"])
+        );
         const clicks = normalizeNumber(pick(row, ["Clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders"]));
@@ -590,7 +654,9 @@ export default function App() {
       .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
       .map((row) => {
         const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
-        const sales = normalizeNumber(pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "14 Day Total Sales"]));
+        const sales = normalizeNumber(
+          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "14 Day Total Sales"])
+        );
         const clicks = normalizeNumber(pick(row, ["Clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders", "Orders (#)"]));
@@ -614,7 +680,9 @@ export default function App() {
       .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
       .map((row) => {
         const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
-        const sales = normalizeNumber(pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 14 Day Total Sales"]));
+        const sales = normalizeNumber(
+          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 14 Day Total Sales"])
+        );
         const clicks = normalizeNumber(pick(row, ["Clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders"]));
@@ -636,7 +704,13 @@ export default function App() {
 
     return [...sp, ...sb, ...sd]
       .filter((row) => adType === "All" || row.adType === adType)
-      .filter((row) => !query || `${row.campaignName} ${row.state} ${row.campaignType} ${row.adType}`.toLowerCase().includes(query.toLowerCase()));
+      .filter(
+        (row) =>
+          !query ||
+          `${row.campaignName} ${row.state} ${row.campaignType} ${row.adType}`
+            .toLowerCase()
+            .includes(query.toLowerCase())
+      );
   }, [spCampaignSheet, sbCampaignSheet, sdCampaignSheet, adType, query]);
 
   const spProductRows = useMemo(() => {
@@ -656,7 +730,9 @@ export default function App() {
           itemType: ref.type || "",
           brand: ref.brand || "",
           shortTitle: ref.shortTitle || asin,
-          imageUrl: ref.imageUrl || (asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg` : ""),
+          imageUrl:
+            ref.imageUrl ||
+            (asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg` : ""),
           impressions,
           clicks,
           spend,
@@ -677,7 +753,9 @@ export default function App() {
       .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
       .forEach((row) => {
         const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
-        const sales = normalizeNumber(pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "14 Day Total Sales"]));
+        const sales = normalizeNumber(
+          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "14 Day Total Sales"])
+        );
         const clicks = normalizeNumber(pick(row, ["Clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders", "Orders (#)"]));
@@ -697,7 +775,9 @@ export default function App() {
             itemType: ref.type || "",
             brand: ref.brand || "",
             shortTitle: ref.shortTitle || asin,
-            imageUrl: ref.imageUrl || `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
+            imageUrl:
+              ref.imageUrl ||
+              `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
             impressions: impressions / divisor,
             clicks: clicks / divisor,
             spend: spend / divisor,
@@ -717,10 +797,14 @@ export default function App() {
     return sdCampaignSheet
       .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
       .map((row) => {
-        const asin = extractAsin(pick(row, ["Promoted ASIN", "ASIN", "Advertised ASIN", "Product"], ""));
+        const asin = extractAsin(
+          pick(row, ["Promoted ASIN", "ASIN", "Advertised ASIN", "Product"], "")
+        );
         const ref = referenceByAsin.get(asin) || {};
         const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
-        const sales = normalizeNumber(pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 14 Day Total Sales"]));
+        const sales = normalizeNumber(
+          pick(row, ["Sales", "Sales(USD)", "Attributed Sales", "Sales 14 Day Total Sales"])
+        );
         const clicks = normalizeNumber(pick(row, ["Clicks"]));
         const impressions = normalizeNumber(pick(row, ["Impressions"]));
         const orders = normalizeNumber(pick(row, ["Orders"]));
@@ -730,8 +814,13 @@ export default function App() {
           parentAsin: ref.parentAsin || "",
           itemType: ref.type || "",
           brand: ref.brand || "",
-          shortTitle: ref.shortTitle || asin || normalizeText(pick(row, ["Campaign Name"], "Display Campaign")),
-          imageUrl: ref.imageUrl || (asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg` : ""),
+          shortTitle:
+            ref.shortTitle ||
+            asin ||
+            normalizeText(pick(row, ["Campaign Name"], "Display Campaign")),
+          imageUrl:
+            ref.imageUrl ||
+            (asin ? `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg` : ""),
           impressions,
           clicks,
           spend,
@@ -752,18 +841,40 @@ export default function App() {
       .filter((row) => brandFilter === "All" || row.brand === brandFilter)
       .filter((row) => itemTypeFilter === "All" || row.itemType === itemTypeFilter)
       .filter((row) => parentFilter === "All" || row.parentAsin === parentFilter)
-      .filter((row) => !query || `${row.asin} ${row.parentAsin} ${row.shortTitle} ${row.brand} ${row.itemType} ${row.adType}`.toLowerCase().includes(query.toLowerCase()));
+      .filter(
+        (row) =>
+          !query ||
+          `${row.asin} ${row.parentAsin} ${row.shortTitle} ${row.brand} ${row.itemType} ${row.adType}`
+            .toLowerCase()
+            .includes(query.toLowerCase())
+      );
   }, [spProductRows, sbProductRows, sdProductRows, adType, brandFilter, itemTypeFilter, parentFilter, query]);
 
-  const brandOptions = useMemo(() => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.brand).filter(Boolean))).sort()], [unifiedProductRows]);
-  const itemTypeOptions = useMemo(() => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.itemType).filter(Boolean))).sort()], [unifiedProductRows]);
-  const parentOptions = useMemo(() => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.parentAsin).filter(Boolean))).sort()], [unifiedProductRows]);
+  const brandOptions = useMemo(
+    () => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.brand).filter(Boolean))).sort()],
+    [unifiedProductRows]
+  );
+  const itemTypeOptions = useMemo(
+    () => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.itemType).filter(Boolean))).sort()],
+    [unifiedProductRows]
+  );
+  const parentOptions = useMemo(
+    () => ["All", ...Array.from(new Set(unifiedProductRows.map((r) => r.parentAsin).filter(Boolean))).sort()],
+    [unifiedProductRows]
+  );
 
   const productGrouped = useMemo(() => {
     const map = new Map();
     unifiedProductRows.forEach((row) => {
       const key = `${row.adType}||${row.asin}`;
-      const current = map.get(key) || { ...row, impressions: 0, clicks: 0, spend: 0, sales: 0, orders: 0 };
+      const current = map.get(key) || {
+        ...row,
+        impressions: 0,
+        clicks: 0,
+        spend: 0,
+        sales: 0,
+        orders: 0,
+      };
       current.impressions += row.impressions;
       current.clicks += row.clicks;
       current.spend += row.spend;
@@ -784,7 +895,16 @@ export default function App() {
     const map = new Map();
     unifiedProductRows.forEach((row) => {
       const key = `${row.adType}||${row.parentAsin || "Unmapped"}`;
-      const current = map.get(key) || { adType: row.adType, parentAsin: row.parentAsin || "Unmapped", imageUrl: row.imageUrl, impressions: 0, clicks: 0, spend: 0, sales: 0, orders: 0 };
+      const current = map.get(key) || {
+        adType: row.adType,
+        parentAsin: row.parentAsin || "Unmapped",
+        imageUrl: row.imageUrl,
+        impressions: 0,
+        clicks: 0,
+        spend: 0,
+        sales: 0,
+        orders: 0,
+      };
       current.impressions += row.impressions;
       current.clicks += row.clicks;
       current.spend += row.spend;
@@ -805,7 +925,15 @@ export default function App() {
     const map = new Map();
     unifiedProductRows.forEach((row) => {
       const key = `${row.adType}||${row.itemType || "Unmapped"}`;
-      const current = map.get(key) || { adType: row.adType, itemType: row.itemType || "Unmapped", impressions: 0, clicks: 0, spend: 0, sales: 0, orders: 0 };
+      const current = map.get(key) || {
+        adType: row.adType,
+        itemType: row.itemType || "Unmapped",
+        impressions: 0,
+        clicks: 0,
+        spend: 0,
+        sales: 0,
+        orders: 0,
+      };
       current.impressions += row.impressions;
       current.clicks += row.clicks;
       current.spend += row.spend;
@@ -828,9 +956,8 @@ export default function App() {
     return { spend, sales, acos: sales ? (spend / sales) * 100 : 0, roas: spend ? sales / spend : 0 };
   }, [unifiedProductRows]);
 
-  const adTrend = useMemo(() => {
-    const top = [...productGrouped].sort((a, b) => b.sales - a.sales).slice(0, 10);
-    return top.map((row) => ({ name: row.shortTitle.length > 22 ? `${row.shortTitle.slice(0, 22)}…` : row.shortTitle, sales: row.sales }));
+  const topProductsList = useMemo(() => {
+    return [...productGrouped].sort((a, b) => b.sales - a.sales).slice(0, 5);
   }, [productGrouped]);
 
   const salesByAsin30d = useMemo(() => {
@@ -841,14 +968,18 @@ export default function App() {
       ).toUpperCase();
       if (!asin) return;
       const ref = referenceByAsin.get(asin) || {};
-      const unitsOrdered = normalizeNumber(pick(row, ["Units Ordered", "units ordered", "Ordered Product Sales Units"], 0));
+      const unitsOrdered = normalizeNumber(
+        pick(row, ["Units Ordered", "units ordered", "Ordered Product Sales Units"], 0)
+      );
       const current = map.get(asin) || {
         asin,
         shortTitle: ref.shortTitle || asin,
         brand: ref.brand || "",
         parentAsin: ref.parentAsin || "",
         itemType: ref.type || "",
-        imageUrl: ref.imageUrl || `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
+        imageUrl:
+          ref.imageUrl ||
+          `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
         units30d: 0,
       };
       current.units30d += unitsOrdered;
@@ -857,8 +988,115 @@ export default function App() {
     return map;
   }, [products30dSheet, referenceByAsin]);
 
-  const fbaInventoryRows = useMemo(() => parseInventoryRows(inventoryFbaSheet, referenceByAsin, "fba"), [inventoryFbaSheet, referenceByAsin]);
-  const awdInventoryRows = useMemo(() => parseInventoryRows(inventoryAwdSheet, referenceByAsin, "awd"), [inventoryAwdSheet, referenceByAsin]);
+  const monthlySales = useMemo(() => {
+    const rows = salesMonthlySheet
+      .map((row) => {
+        const rawDate = pick(row, ["Date", "Month", "date", "month"], "");
+        const sales = normalizeNumber(
+          pick(row, ["Ordered Product Sales", "ordered product sales", "Sales", "sales"], 0)
+        );
+        const units = normalizeNumber(
+          pick(row, ["Units Ordered", "units ordered", "Units", "units"], 0)
+        );
+        const profit = normalizeNumber(
+          pick(row, ["Profit", "profit", "Net Profit", "net profit"], 0)
+        );
+        const parsedDate = new Date(rawDate);
+        return {
+          rawDate,
+          parsedDate,
+          label: monthLabel(rawDate),
+          sales,
+          units,
+          profit,
+          hasProfit:
+            pick(row, ["Profit", "profit", "Net Profit", "net profit"], null) !== null &&
+            pick(row, ["Profit", "profit", "Net Profit", "net profit"], "") !== "",
+        };
+      })
+      .filter((row) => row.rawDate);
+
+    rows.sort((a, b) => {
+      const ad = a.parsedDate instanceof Date && !Number.isNaN(a.parsedDate) ? a.parsedDate.getTime() : 0;
+      const bd = b.parsedDate instanceof Date && !Number.isNaN(b.parsedDate) ? b.parsedDate.getTime() : 0;
+      return ad - bd;
+    });
+
+    return rows;
+  }, [salesMonthlySheet]);
+
+  const monthlySalesChartData = useMemo(() => {
+    return monthlySales.map((row) => ({
+      month: row.label,
+      sales: row.sales,
+      profit: row.hasProfit ? row.profit : null,
+    }));
+  }, [monthlySales]);
+
+  const currentMonthRow = monthlySales[monthlySales.length - 1] || null;
+  const previousMonthRow = monthlySales[monthlySales.length - 2] || null;
+
+  const sameMonthLastYearRow = useMemo(() => {
+    if (!currentMonthRow || !currentMonthRow.parsedDate || Number.isNaN(currentMonthRow.parsedDate.getTime())) {
+      return null;
+    }
+    const currentMonth = currentMonthRow.parsedDate.getMonth();
+    const currentYear = currentMonthRow.parsedDate.getFullYear();
+    return (
+      monthlySales.find((row) => {
+        if (!row.parsedDate || Number.isNaN(row.parsedDate.getTime())) return false;
+        return (
+          row.parsedDate.getMonth() === currentMonth &&
+          row.parsedDate.getFullYear() === currentYear - 1
+        );
+      }) || null
+    );
+  }, [monthlySales, currentMonthRow]);
+
+  const salesVsLastMonth = percentChange(currentMonthRow?.sales, previousMonthRow?.sales);
+  const salesVsLastYear = percentChange(currentMonthRow?.sales, sameMonthLastYearRow?.sales);
+  const profitVsLastMonth =
+    currentMonthRow?.hasProfit && previousMonthRow?.hasProfit
+      ? percentChange(currentMonthRow?.profit, previousMonthRow?.profit)
+      : null;
+  const profitVsLastYear =
+    currentMonthRow?.hasProfit && sameMonthLastYearRow?.hasProfit
+      ? percentChange(currentMonthRow?.profit, sameMonthLastYearRow?.profit)
+      : null;
+
+  const revenueByBrand = useMemo(() => {
+    const map = new Map();
+    productGrouped.forEach((row) => {
+      const key = row.brand || "Unknown";
+      map.set(key, (map.get(key) || 0) + row.sales);
+    });
+    return [...map.entries()]
+      .map(([brand, sales]) => ({ brand, sales }))
+      .sort((a, b) => b.sales - a.sales)
+      .slice(0, 8);
+  }, [productGrouped]);
+
+  const revenueByCategory = useMemo(() => {
+    const map = new Map();
+    productGrouped.forEach((row) => {
+      const key = row.itemType || "Unknown";
+      map.set(key, (map.get(key) || 0) + row.sales);
+    });
+    return [...map.entries()]
+      .map(([category, sales]) => ({ category, sales }))
+      .sort((a, b) => b.sales - a.sales)
+      .slice(0, 8);
+  }, [productGrouped]);
+
+  const fbaInventoryRows = useMemo(
+    () => parseInventoryRows(inventoryFbaSheet, referenceByAsin, "fba"),
+    [inventoryFbaSheet, referenceByAsin]
+  );
+
+  const awdInventoryRows = useMemo(
+    () => parseInventoryRows(inventoryAwdSheet, referenceByAsin, "awd"),
+    [inventoryAwdSheet, referenceByAsin]
+  );
 
   const inventoryByAsin = useMemo(() => {
     const map = new Map();
@@ -895,7 +1133,13 @@ export default function App() {
         unitsPerDay,
         totalUnits,
         daysOfCover,
-        urgency: !Number.isFinite(daysOfCover) ? "no_sales" : daysOfCover < DAYS_URGENT ? "urgent" : daysOfCover < DAYS_TO_SHIP_TARGET ? "replenish" : "healthy",
+        urgency: !Number.isFinite(daysOfCover)
+          ? "no_sales"
+          : daysOfCover < DAYS_URGENT
+          ? "urgent"
+          : daysOfCover < DAYS_TO_SHIP_TARGET
+          ? "replenish"
+          : "healthy",
       };
     });
   }, [fbaInventoryRows, awdInventoryRows, salesByAsin30d]);
@@ -903,11 +1147,30 @@ export default function App() {
   const inventoryFiltered = useMemo(() => {
     return inventoryByAsin
       .filter((row) => inventoryFilter === "All" || row.urgency === inventoryFilter)
-      .filter((row) => !query || `${row.asin} ${row.shortTitle} ${row.brand} ${row.parentAsin} ${row.itemType}`.toLowerCase().includes(query.toLowerCase()));
+      .filter(
+        (row) =>
+          !query ||
+          `${row.asin} ${row.shortTitle} ${row.brand} ${row.parentAsin} ${row.itemType}`
+            .toLowerCase()
+            .includes(query.toLowerCase())
+      );
   }, [inventoryByAsin, inventoryFilter, query]);
 
-  const urgentInventory = useMemo(() => inventoryByAsin.filter((row) => row.urgency === "urgent").sort((a, b) => a.daysOfCover - b.daysOfCover), [inventoryByAsin]);
-  const replenishInventory = useMemo(() => inventoryByAsin.filter((row) => row.urgency === "replenish").sort((a, b) => a.daysOfCover - b.daysOfCover), [inventoryByAsin]);
+  const urgentInventory = useMemo(
+    () =>
+      inventoryByAsin
+        .filter((row) => row.urgency === "urgent")
+        .sort((a, b) => a.daysOfCover - b.daysOfCover),
+    [inventoryByAsin]
+  );
+
+  const replenishInventory = useMemo(
+    () =>
+      inventoryByAsin
+        .filter((row) => row.urgency === "replenish")
+        .sort((a, b) => a.daysOfCover - b.daysOfCover),
+    [inventoryByAsin]
+  );
 
   const inventorySummary = useMemo(() => {
     const totalFba = inventoryByAsin.reduce((sum, row) => sum + row.fbaUnits, 0);
@@ -915,7 +1178,8 @@ export default function App() {
     const atRisk = inventoryByAsin.filter((row) => row.daysOfCover < DAYS_TO_SHIP_TARGET).length;
     const urgent = inventoryByAsin.filter((row) => row.daysOfCover < DAYS_URGENT).length;
     const totalDailySales = inventoryByAsin.reduce((sum, row) => sum + row.unitsPerDay, 0);
-    const blendedDays = totalDailySales > 0 ? (totalFba + totalAwd) / totalDailySales : Number.POSITIVE_INFINITY;
+    const blendedDays =
+      totalDailySales > 0 ? (totalFba + totalAwd) / totalDailySales : Number.POSITIVE_INFINITY;
     return { totalFba, totalAwd, atRisk, urgent, blendedDays };
   }, [inventoryByAsin]);
 
@@ -924,7 +1188,10 @@ export default function App() {
       .filter((row) => Number.isFinite(row.daysOfCover))
       .sort((a, b) => a.daysOfCover - b.daysOfCover)
       .slice(0, 12)
-      .map((row) => ({ name: row.shortTitle.length > 18 ? `${row.shortTitle.slice(0, 18)}…` : row.shortTitle, days: row.daysOfCover }));
+      .map((row) => ({
+        name: row.shortTitle.length > 18 ? `${row.shortTitle.slice(0, 18)}…` : row.shortTitle,
+        days: row.daysOfCover,
+      }));
   }, [inventoryByAsin]);
 
   const spExistingNegatives = useMemo(() => {
@@ -937,8 +1204,12 @@ export default function App() {
       .map((row) => ({
         adType: "Sponsored Products",
         entity: normalizeText(pick(row, ["Entity"])),
-        campaign: normalizeText(pick(row, ["Campaign Name (Informational only)", "Campaign Name"], "—")),
-        adGroup: normalizeText(pick(row, ["Ad Group Name (Informational only)", "Ad Group Name"], "—")),
+        campaign: normalizeText(
+          pick(row, ["Campaign Name (Informational only)", "Campaign Name"], "—")
+        ),
+        adGroup: normalizeText(
+          pick(row, ["Ad Group Name (Informational only)", "Ad Group Name"], "—")
+        ),
         term: normalizeText(pick(row, ["Keyword Text", "Product Targeting Expression"], "")),
         matchType: normalizeText(pick(row, ["Match Type"], "—")),
         state: normalizeText(pick(row, ["State"], "—")),
@@ -956,8 +1227,12 @@ export default function App() {
       .map((row) => ({
         adType: "Sponsored Brands",
         entity: normalizeText(pick(row, ["Entity"])),
-        campaign: normalizeText(pick(row, ["Campaign Name (Informational only)", "Campaign Name"], "—")),
-        adGroup: normalizeText(pick(row, ["Ad Group Name (Informational only)", "Ad Group Name"], "—")),
+        campaign: normalizeText(
+          pick(row, ["Campaign Name (Informational only)", "Campaign Name"], "—")
+        ),
+        adGroup: normalizeText(
+          pick(row, ["Ad Group Name (Informational only)", "Ad Group Name"], "—")
+        ),
         term: normalizeText(pick(row, ["Keyword Text", "Product Targeting Expression"], "")),
         matchType: normalizeText(pick(row, ["Match Type"], "—")),
         state: normalizeText(pick(row, ["State"], "—")),
@@ -968,7 +1243,13 @@ export default function App() {
   const existingNegatives = useMemo(() => {
     return [...spExistingNegatives, ...sbExistingNegatives]
       .filter((row) => adType === "All" || row.adType === adType)
-      .filter((row) => !query || `${row.term} ${row.campaign} ${row.adGroup} ${row.matchType} ${row.adType}`.toLowerCase().includes(query.toLowerCase()));
+      .filter(
+        (row) =>
+          !query ||
+          `${row.term} ${row.campaign} ${row.adGroup} ${row.matchType} ${row.adType}`
+            .toLowerCase()
+            .includes(query.toLowerCase())
+      );
   }, [spExistingNegatives, sbExistingNegatives, adType, query]);
 
   const existingNegativeSet = useMemo(() => {
@@ -1015,7 +1296,13 @@ export default function App() {
     return [...sp, ...sb]
       .filter((row) => row.searchTerm)
       .filter((row) => adType === "All" || row.adType === adType)
-      .filter((row) => !query || `${row.searchTerm} ${row.campaign} ${row.adGroup} ${row.keywordText} ${row.adType}`.toLowerCase().includes(query.toLowerCase()));
+      .filter(
+        (row) =>
+          !query ||
+          `${row.searchTerm} ${row.campaign} ${row.adGroup} ${row.keywordText} ${row.adType}`
+            .toLowerCase()
+            .includes(query.toLowerCase())
+      );
   }, [spSearchTermsSheet, sbSearchTermsSheet, adType, query]);
 
   const recommendedNegatives = useMemo(() => {
@@ -1023,7 +1310,10 @@ export default function App() {
       .filter((row) => row.clicks >= NEGATIVE_CLICK_THRESHOLD && row.orders === 0 && row.units === 0)
       .map((row) => ({
         ...row,
-        suggestedNegativeType: row.matchType && row.matchType.toLowerCase().includes("broad") ? "Negative Phrase" : "Negative Exact",
+        suggestedNegativeType:
+          row.matchType && row.matchType.toLowerCase().includes("broad")
+            ? "Negative Phrase"
+            : "Negative Exact",
         alreadyBlocked: existingNegativeSet.has(`${row.adType}||${row.searchTerm.toLowerCase()}`),
       }))
       .sort((a, b) => b.spend - a.spend);
@@ -1033,7 +1323,9 @@ export default function App() {
     const totalWaste = recommendedNegatives.reduce((sum, row) => sum + row.spend, 0);
     const alreadyBlockedCount = recommendedNegatives.filter((row) => row.alreadyBlocked).length;
     const openCount = recommendedNegatives.filter((row) => !row.alreadyBlocked).length;
-    const protectedSpend = recommendedNegatives.filter((row) => row.alreadyBlocked).reduce((sum, row) => sum + row.spend, 0);
+    const protectedSpend = recommendedNegatives
+      .filter((row) => row.alreadyBlocked)
+      .reduce((sum, row) => sum + row.spend, 0);
     return { totalWaste, alreadyBlockedCount, openCount, protectedSpend };
   }, [recommendedNegatives]);
 
@@ -1196,7 +1488,13 @@ export default function App() {
     { key: "units", label: "Units", type: "number", render: (r) => numberFmt(r.units) },
     { key: "sales", label: "Sales", type: "number", render: (r) => currency(r.sales) },
     { key: "suggestedNegativeType", label: "Suggested Type", type: "text" },
-    { key: "alreadyBlocked", label: "Action", type: "text", render: (r) => recommendationPill(r), sortAccessor: (r) => (r.alreadyBlocked ? "z" : "a") },
+    {
+      key: "alreadyBlocked",
+      label: "Action",
+      type: "text",
+      render: (r) => recommendationPill(r),
+      sortAccessor: (r) => (r.alreadyBlocked ? "z" : "a"),
+    },
   ];
 
   const existingNegativeColumns = [
@@ -1244,7 +1542,11 @@ export default function App() {
   ];
 
   if (loading) {
-    return <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">Loading Google Sheets data...</div>;
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
+        Loading Google Sheets data...
+      </div>
+    );
   }
 
   return (
@@ -1265,7 +1567,13 @@ export default function App() {
 
           <div className="mt-6 space-y-2">
             {tabs.map((tab) => (
-              <SidebarButton key={tab.id} active={activeTab === tab.id} icon={tab.icon} label={tab.label} onClick={() => setActiveTab(tab.id)} />
+              <SidebarButton
+                key={tab.id}
+                active={activeTab === tab.id}
+                icon={tab.icon}
+                label={tab.label}
+                onClick={() => setActiveTab(tab.id)}
+              />
             ))}
           </div>
         </aside>
@@ -1273,56 +1581,226 @@ export default function App() {
         <main className="p-4 md:p-6 xl:p-8">
           <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-white">Five Star Napkins Dashboard</h1>
-              <p className="mt-2 text-sm text-slate-400">Seller Central only. Live from Google Sheets.</p>
+              <h1 className="text-3xl font-semibold tracking-tight text-white">
+                Five Star Napkins Dashboard
+              </h1>
+              <p className="mt-2 text-sm text-slate-400">
+                Seller Central only. Live from Google Sheets.
+              </p>
             </div>
 
             <div className="flex flex-col gap-3 md:flex-row md:items-center">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search campaign, ASIN, parent, item type..." className="w-full rounded-2xl border border-slate-800 bg-slate-950 px-10 py-3 text-sm text-white outline-none placeholder:text-slate-500 md:w-80" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search campaign, ASIN, parent, item type..."
+                  className="w-full rounded-2xl border border-slate-800 bg-slate-950 px-10 py-3 text-sm text-white outline-none placeholder:text-slate-500 md:w-80"
+                />
               </div>
 
-              <button onClick={() => window.location.reload()} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-slate-800">
+              <button
+                onClick={() => window.location.reload()}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-slate-800"
+              >
                 <RefreshCw className="h-4 w-4" /> Refresh
               </button>
             </div>
           </div>
 
-          {error ? <div className="mb-6 rounded-2xl border border-rose-900 bg-rose-950/40 p-4 text-sm text-rose-200">{error}</div> : null}
+          {error ? (
+            <div className="mb-6 rounded-2xl border border-rose-900 bg-rose-950/40 p-4 text-sm text-rose-200">
+              {error}
+            </div>
+          ) : null}
 
           {activeTab === "overview" && (
             <div className="space-y-6">
+              <SectionCard title="Monthly Sales & Profit Trend" subtitle="Sales from sales_monthly. Profit will populate once profit data is added.">
+                <div className="h-64 w-full">
+                  <ResponsiveContainer>
+                    <BarChart data={monthlySalesChartData}>
+                      <CartesianGrid stroke="#172033" vertical={false} />
+                      <XAxis dataKey="month" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis
+                        stroke="#64748b"
+                        fontSize={12}
+                        tickFormatter={(v) => `$${compactNumber(v)}`}
+                        tickLine={false}
+                        axisLine={false}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          background: "#020617",
+                          border: "1px solid #1e293b",
+                          borderRadius: 16,
+                        }}
+                        formatter={(value, name) =>
+                          name === "profit"
+                            ? value === null
+                              ? "Pending"
+                              : currency(value)
+                            : currency(value)
+                        }
+                      />
+                      <Bar dataKey="sales" radius={[8, 8, 0, 0]} fill="#334f74" />
+                      <Line type="monotone" dataKey="profit" stroke="#34d399" strokeWidth={2} dot={false} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </SectionCard>
+
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <StatCard
+                  label="This Month Sales"
+                  value={currentMonthRow?.sales || 0}
+                  icon={DollarSign}
+                />
+                <StatCard
+                  label="This Month Units"
+                  value={currentMonthRow?.units || 0}
+                  suffix="count"
+                  icon={Package}
+                />
                 <StatCard label="Ad Spend" value={adSummary.spend} icon={Megaphone} />
-                <StatCard label="Ad Sales" value={adSummary.sales} icon={DollarSign} />
-                <StatCard label="ACOS" value={adSummary.acos} suffix="%" icon={BarChart3} />
-                <StatCard label="ROAS" value={adSummary.roas} suffix="x" icon={RefreshCw} />
+                <StatCard
+                  label="ROAS"
+                  value={adSummary.roas}
+                  suffix="x"
+                  icon={BarChart3}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <ComparisonCard
+                  title="Sales vs Last Month"
+                  value={salesVsLastMonth === null ? "—" : pct(salesVsLastMonth)}
+                  positive={salesVsLastMonth === null ? null : salesVsLastMonth >= 0}
+                  subtitle={
+                    previousMonthRow
+                      ? `${currentMonthRow?.label || "Current"} vs ${previousMonthRow.label}`
+                      : "Waiting for prior month data"
+                  }
+                />
+                <ComparisonCard
+                  title="Profit vs Last Month"
+                  value={profitVsLastMonth === null ? "Pending" : pct(profitVsLastMonth)}
+                  positive={profitVsLastMonth === null ? null : profitVsLastMonth >= 0}
+                  subtitle="Will activate automatically when monthly profit is added"
+                />
+                <ComparisonCard
+                  title="Sales vs Same Month LY"
+                  value={salesVsLastYear === null ? "—" : pct(salesVsLastYear)}
+                  positive={salesVsLastYear === null ? null : salesVsLastYear >= 0}
+                  subtitle={
+                    sameMonthLastYearRow
+                      ? `${currentMonthRow?.label || "Current"} vs ${sameMonthLastYearRow.label}`
+                      : "Waiting for same month last year data"
+                  }
+                />
+                <ComparisonCard
+                  title="Profit vs Same Month LY"
+                  value={profitVsLastYear === null ? "Pending" : pct(profitVsLastYear)}
+                  positive={profitVsLastYear === null ? null : profitVsLastYear >= 0}
+                  subtitle="Will activate automatically when monthly profit is added"
+                />
               </div>
 
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                <SectionCard title="Top Product Ad Sales" subtitle="Top 10 products by ad sales">
-                  <div className="h-80 w-full">
-                    <ResponsiveContainer>
-                      <BarChart data={adTrend}>
-                        <CartesianGrid stroke="#172033" vertical={false} />
-                        <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                        <YAxis stroke="#64748b" fontSize={12} tickFormatter={(v) => `$${compactNumber(v)}`} tickLine={false} axisLine={false} />
-                        <Tooltip contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: 16 }} formatter={(v) => currency(v)} />
-                        <Bar dataKey="sales" radius={[8, 8, 0, 0]} fill="#38bdf8" />
-                      </BarChart>
-                    </ResponsiveContainer>
+                <SectionCard title="Revenue by Brand" subtitle="30 day ad sales">
+                  <div className="space-y-4">
+                    {revenueByBrand.map((row) => (
+                      <div key={row.brand}>
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <span className="text-sm text-slate-200">{row.brand}</span>
+                          <span className="text-sm font-medium text-white">{currency(row.sales)}</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-slate-900">
+                          <div
+                            className="h-2 rounded-full bg-cyan-400"
+                            style={{
+                              width: `${(row.sales / (revenueByBrand[0]?.sales || 1)) * 100}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </SectionCard>
 
-                <SectionCard title="Inventory Snapshot" subtitle="High-level stock health based on 30 day unit velocity">
-                  <div className="grid grid-cols-2 gap-4">
-                    <CountCard label="At Risk < 2 Months" value={inventorySummary.atRisk} icon={Boxes} tone="amber" />
-                    <CountCard label="Urgent < 2 Weeks" value={inventorySummary.urgent} icon={AlertTriangle} tone="rose" />
-                    <CountCard label="FBA Units" value={inventorySummary.totalFba} icon={Warehouse} tone="cyan" />
-                    <CountCard label="AWD Units" value={inventorySummary.totalAwd} icon={Truck} tone="emerald" />
+                <SectionCard title="Revenue by Category" subtitle="30 day ad sales">
+                  <div className="space-y-4">
+                    {revenueByCategory.map((row) => (
+                      <div key={row.category}>
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <span className="text-sm text-slate-200">{row.category}</span>
+                          <span className="text-sm font-medium text-white">{currency(row.sales)}</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-slate-900">
+                          <div
+                            className="h-2 rounded-full bg-emerald-400"
+                            style={{
+                              width: `${(row.sales / (revenueByCategory[0]?.sales || 1)) * 100}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </SectionCard>
+              </div>
+
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_1fr]">
+                <SectionCard title="Top Products" subtitle="Top 5 by 30 day ad sales">
+                  <div className="space-y-3">
+                    {topProductsList.map((row, index) => (
+                      <div
+                        key={`${row.adType}-${row.asin}`}
+                        className="flex items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-900/40 p-3"
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cyan-400/20 text-xs font-semibold text-cyan-300">
+                            #{index + 1}
+                          </div>
+                          <AsinImage src={row.imageUrl} title={row.shortTitle} />
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-white">{row.shortTitle}</div>
+                            <div className="mt-1 text-xs text-slate-400">
+                              {row.asin} · {row.brand || "Unknown"} · {row.itemType || "Unknown"}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-semibold text-white">{currency(row.sales)}</div>
+                          <div className="mt-1 text-xs text-slate-400">{numberFmt(row.orders)} orders</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </SectionCard>
+
+                <div className="grid grid-cols-1 gap-6">
+                  <SectionCard title="Advertising" subtitle="30 day summary">
+                    <div className="space-y-4 text-sm">
+                      <div className="flex items-center justify-between"><span className="text-slate-400">Active Campaigns</span><span className="font-medium text-white">{numberFmt(unifiedCampaignRows.length)}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-400">Total Spend</span><span className="font-medium text-white">{currency(adSummary.spend)}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-400">Sales</span><span className="font-medium text-white">{currency(adSummary.sales)}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-400">ACOS</span><span className="font-medium text-white">{pct(adSummary.acos)}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-400">ROAS</span><span className="font-medium text-white">{adSummary.roas.toFixed(2)}x</span></div>
+                    </div>
+                  </SectionCard>
+
+                  <SectionCard title="Inventory" subtitle="Network-level availability">
+                    <div className="space-y-4 text-sm">
+                      <div className="flex items-center justify-between"><span className="text-slate-400">FBA Units</span><span className="font-medium text-white">{numberFmt(inventorySummary.totalFba)}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-400">AWD Units</span><span className="font-medium text-white">{numberFmt(inventorySummary.totalAwd)}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-400">At Risk ASINs</span><span className="font-medium text-amber-300">{numberFmt(inventorySummary.atRisk)}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-400">Urgent ASINs</span><span className="font-medium text-rose-300">{numberFmt(inventorySummary.urgent)}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-400">Blended Cover</span><span className="font-medium text-white">{daysLabel(inventorySummary.blendedDays)}</span></div>
+                    </div>
+                  </SectionCard>
+                </div>
               </div>
             </div>
           )}
@@ -1336,21 +1814,73 @@ export default function App() {
                 <StatCard label="ROAS" value={adSummary.roas} suffix="x" icon={RefreshCw} />
               </div>
 
-              <SectionCard title="Advertising Performance" subtitle="Now supports Sponsored Products, Sponsored Brands, and Sponsored Display" right={<TogglePills value={adView} onChange={setAdView} options={["Campaign", "Product", "Parent", "Item Type"]} />}>
+              <SectionCard
+                title="Advertising Performance"
+                subtitle="Now supports Sponsored Products, Sponsored Brands, and Sponsored Display"
+                right={
+                  <TogglePills
+                    value={adView}
+                    onChange={setAdView}
+                    options={["Campaign", "Product", "Parent", "Item Type"]}
+                  />
+                }
+              >
                 <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
                   <FilterSelect label="Ad Type" value={adType} onChange={setAdType} options={adTypeOptions} />
                   <FilterSelect label="Brand" value={brandFilter} onChange={setBrandFilter} options={brandOptions} />
                   <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
                   <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
                   <div className="flex items-end">
-                    <button onClick={() => { setAdType("All"); setBrandFilter("All"); setItemTypeFilter("All"); setParentFilter("All"); }} className="w-full rounded-2xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm text-slate-200 transition hover:bg-slate-800">Clear filters</button>
+                    <button
+                      onClick={() => {
+                        setAdType("All");
+                        setBrandFilter("All");
+                        setItemTypeFilter("All");
+                        setParentFilter("All");
+                      }}
+                      className="w-full rounded-2xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm text-slate-200 transition hover:bg-slate-800"
+                    >
+                      Clear filters
+                    </button>
                   </div>
                 </div>
 
-                {adView === "Campaign" && <SortableTable rowKey="campaignName" columns={campaignColumns} rows={campaignSort.sortedRows} sortConfig={campaignSort.sortConfig} onSort={campaignSort.handleSort} />}
-                {adView === "Product" && <SortableTable rowKey={(row) => `${row.adType}-${row.asin}`} columns={productColumns} rows={productSort.sortedRows} sortConfig={productSort.sortConfig} onSort={productSort.handleSort} />}
-                {adView === "Parent" && <SortableTable rowKey={(row) => `${row.adType}-${row.parentAsin}`} columns={parentColumns} rows={parentSort.sortedRows} sortConfig={parentSort.sortConfig} onSort={parentSort.handleSort} />}
-                {adView === "Item Type" && <SortableTable rowKey={(row) => `${row.adType}-${row.itemType}`} columns={itemTypeColumns} rows={itemTypeSort.sortedRows} sortConfig={itemTypeSort.sortConfig} onSort={itemTypeSort.handleSort} />}
+                {adView === "Campaign" && (
+                  <SortableTable
+                    rowKey="campaignName"
+                    columns={campaignColumns}
+                    rows={campaignSort.sortedRows}
+                    sortConfig={campaignSort.sortConfig}
+                    onSort={campaignSort.handleSort}
+                  />
+                )}
+                {adView === "Product" && (
+                  <SortableTable
+                    rowKey={(row) => `${row.adType}-${row.asin}`}
+                    columns={productColumns}
+                    rows={productSort.sortedRows}
+                    sortConfig={productSort.sortConfig}
+                    onSort={productSort.handleSort}
+                  />
+                )}
+                {adView === "Parent" && (
+                  <SortableTable
+                    rowKey={(row) => `${row.adType}-${row.parentAsin}`}
+                    columns={parentColumns}
+                    rows={parentSort.sortedRows}
+                    sortConfig={parentSort.sortConfig}
+                    onSort={parentSort.handleSort}
+                  />
+                )}
+                {adView === "Item Type" && (
+                  <SortableTable
+                    rowKey={(row) => `${row.adType}-${row.itemType}`}
+                    columns={itemTypeColumns}
+                    rows={itemTypeSort.sortedRows}
+                    sortConfig={itemTypeSort.sortConfig}
+                    onSort={itemTypeSort.handleSort}
+                  />
+                )}
               </SectionCard>
             </div>
           )}
@@ -1364,8 +1894,12 @@ export default function App() {
                 <StatCard label="Spend Already Protected" value={wastedSpendSummary.protectedSpend} icon={ShieldMinus} tone="emerald" />
               </div>
 
-              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.2fr_1fr]">
-                <SectionCard title="Search Term Intelligence" subtitle="Shows existing negatives plus search terms with 10+ clicks and no conversions" right={<TogglePills value={searchView} onChange={setSearchView} options={["Recommended", "Existing Negatives", "All Terms"]} />}>
+              <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[1.2fr_1fr]">
+                <SectionCard
+                  title="Search Term Intelligence"
+                  subtitle="Shows existing negatives plus search terms with 10+ clicks and no conversions"
+                  right={<TogglePills value={searchView} onChange={setSearchView} options={["Recommended", "Existing Negatives", "All Terms"]} />}
+                >
                   <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-4">
                     <FilterSelect label="Ad Type" value={adType} onChange={setAdType} options={adTypeOptions} />
                     <FilterSelect label="Brand" value={brandFilter} onChange={setBrandFilter} options={brandOptions} />
@@ -1373,19 +1907,61 @@ export default function App() {
                     <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
                   </div>
 
-                  {searchView === "Recommended" && <SortableTable rowKey={(row, i) => `${row.adType}-${row.searchTerm}-${i}`} columns={recommendedColumns} rows={recommendedSort.sortedRows} sortConfig={recommendedSort.sortConfig} onSort={recommendedSort.handleSort} />}
-                  {searchView === "Existing Negatives" && <SortableTable rowKey={(row, i) => `${row.adType}-${row.term}-${i}`} columns={existingNegativeColumns} rows={existingNegativeSort.sortedRows} sortConfig={existingNegativeSort.sortConfig} onSort={existingNegativeSort.handleSort} />}
-                  {searchView === "All Terms" && <SortableTable rowKey={(row, i) => `${row.adType}-${row.searchTerm}-${i}`} columns={allSearchTermColumns} rows={allSearchTermSort.sortedRows} sortConfig={allSearchTermSort.sortConfig} onSort={allSearchTermSort.handleSort} />}
+                  {searchView === "Recommended" && (
+                    <SortableTable
+                      rowKey={(row, i) => `${row.adType}-${row.searchTerm}-${i}`}
+                      columns={recommendedColumns}
+                      rows={recommendedSort.sortedRows}
+                      sortConfig={recommendedSort.sortConfig}
+                      onSort={recommendedSort.handleSort}
+                    />
+                  )}
+                  {searchView === "Existing Negatives" && (
+                    <SortableTable
+                      rowKey={(row, i) => `${row.adType}-${row.term}-${i}`}
+                      columns={existingNegativeColumns}
+                      rows={existingNegativeSort.sortedRows}
+                      sortConfig={existingNegativeSort.sortConfig}
+                      onSort={existingNegativeSort.handleSort}
+                    />
+                  )}
+                  {searchView === "All Terms" && (
+                    <SortableTable
+                      rowKey={(row, i) => `${row.adType}-${row.searchTerm}-${i}`}
+                      columns={allSearchTermColumns}
+                      rows={allSearchTermSort.sortedRows}
+                      sortConfig={allSearchTermSort.sortConfig}
+                      onSort={allSearchTermSort.handleSort}
+                    />
+                  )}
                 </SectionCard>
 
-                <SectionCard title="Top Waste Terms" subtitle="Highest-spend search terms still recommended for negative matching">
+                <SectionCard
+                  title="Top Waste Terms"
+                  subtitle="Highest-spend search terms still recommended for negative matching"
+                >
                   <div className="h-96 w-full">
                     <ResponsiveContainer>
                       <BarChart data={wasteChartData} layout="vertical" margin={{ left: 10, right: 10 }}>
                         <CartesianGrid stroke="#172033" horizontal={false} />
                         <XAxis type="number" stroke="#64748b" tickLine={false} axisLine={false} />
-                        <YAxis type="category" dataKey="name" width={120} stroke="#64748b" tickLine={false} axisLine={false} fontSize={12} />
-                        <Tooltip contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: 16 }} formatter={(v) => currency(v)} />
+                        <YAxis
+                          type="category"
+                          dataKey="name"
+                          width={120}
+                          stroke="#64748b"
+                          tickLine={false}
+                          axisLine={false}
+                          fontSize={12}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            background: "#020617",
+                            border: "1px solid #1e293b",
+                            borderRadius: 16,
+                          }}
+                          formatter={(v) => currency(v)}
+                        />
                         <Bar dataKey="spend" radius={[0, 8, 8, 0]} fill="#f59e0b" />
                       </BarChart>
                     </ResponsiveContainer>
@@ -1408,17 +1984,33 @@ export default function App() {
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
                 <SectionCard title="Urgent Block" subtitle="ASINs below 2 weeks of cover need immediate attention">
                   {urgentInventory.length === 0 ? (
-                    <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">No ASINs are below 2 weeks of cover.</div>
+                    <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">
+                      No ASINs are below 2 weeks of cover.
+                    </div>
                   ) : (
-                    <SortableTable rowKey="asin" columns={inventoryColumns} rows={urgentSort.sortedRows.slice(0, 25)} sortConfig={urgentSort.sortConfig} onSort={urgentSort.handleSort} />
+                    <SortableTable
+                      rowKey="asin"
+                      columns={inventoryColumns}
+                      rows={urgentSort.sortedRows.slice(0, 25)}
+                      sortConfig={urgentSort.sortConfig}
+                      onSort={urgentSort.handleSort}
+                    />
                   )}
                 </SectionCard>
 
                 <SectionCard title="Replenishment Watch" subtitle="ASINs below 2 months of cover but above urgent threshold">
                   {replenishInventory.length === 0 ? (
-                    <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">Nothing currently falls into the watch window.</div>
+                    <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">
+                      Nothing currently falls into the watch window.
+                    </div>
                   ) : (
-                    <SortableTable rowKey="asin" columns={inventoryColumns} rows={replenishSort.sortedRows.slice(0, 25)} sortConfig={replenishSort.sortConfig} onSort={replenishSort.handleSort} />
+                    <SortableTable
+                      rowKey="asin"
+                      columns={inventoryColumns}
+                      rows={replenishSort.sortedRows.slice(0, 25)}
+                      sortConfig={replenishSort.sortConfig}
+                      onSort={replenishSort.handleSort}
+                    />
                   )}
                 </SectionCard>
               </div>
@@ -1431,7 +2023,13 @@ export default function App() {
                     <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
                     <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
                   </div>
-                  <SortableTable rowKey="asin" columns={inventoryColumns} rows={inventorySort.sortedRows} sortConfig={inventorySort.sortConfig} onSort={inventorySort.handleSort} />
+                  <SortableTable
+                    rowKey="asin"
+                    columns={inventoryColumns}
+                    rows={inventorySort.sortedRows}
+                    sortConfig={inventorySort.sortConfig}
+                    onSort={inventorySort.handleSort}
+                  />
                 </SectionCard>
 
                 <SectionCard title="Lowest Cover ASINs" subtitle="Quick visual for the 12 tightest stock positions">
@@ -1440,8 +2038,23 @@ export default function App() {
                       <BarChart data={riskChartData} layout="vertical" margin={{ left: 10, right: 10 }}>
                         <CartesianGrid stroke="#172033" horizontal={false} />
                         <XAxis type="number" stroke="#64748b" tickLine={false} axisLine={false} />
-                        <YAxis type="category" dataKey="name" width={120} stroke="#64748b" tickLine={false} axisLine={false} fontSize={12} />
-                        <Tooltip contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: 16 }} formatter={(v) => daysLabel(v)} />
+                        <YAxis
+                          type="category"
+                          dataKey="name"
+                          width={120}
+                          stroke="#64748b"
+                          tickLine={false}
+                          axisLine={false}
+                          fontSize={12}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            background: "#020617",
+                            border: "1px solid #1e293b",
+                            borderRadius: 16,
+                          }}
+                          formatter={(v) => daysLabel(v)}
+                        />
                         <Bar dataKey="days" radius={[0, 8, 8, 0]} fill="#f59e0b" />
                       </BarChart>
                     </ResponsiveContainer>
@@ -1467,7 +2080,13 @@ export default function App() {
                   <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
                   <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
                 </div>
-                <SortableTable rowKey={(row) => `${row.adType}-${row.asin}`} columns={catalogColumns} rows={catalogSort.sortedRows} sortConfig={catalogSort.sortConfig} onSort={catalogSort.handleSort} />
+                <SortableTable
+                  rowKey={(row) => `${row.adType}-${row.asin}`}
+                  columns={catalogColumns}
+                  rows={catalogSort.sortedRows}
+                  sortConfig={catalogSort.sortConfig}
+                  onSort={catalogSort.handleSort}
+                />
               </SectionCard>
             </div>
           )}
