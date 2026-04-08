@@ -133,6 +133,33 @@ function daysLabel(days) {
   return `${Math.round(days)}d`;
 }
 
+function parseAnyDate(value) {
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+
+  if (typeof value === "string") {
+    const gvizMatch = value.match(/Date\((\d{4}),(\d{1,2}),(\d{1,2})\)/);
+    if (gvizMatch) {
+      const year = Number(gvizMatch[1]);
+      const month = Number(gvizMatch[2]);
+      const day = Number(gvizMatch[3]);
+      const d = new Date(year, month, day);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+
+    const iso = new Date(value);
+    if (!Number.isNaN(iso.getTime())) return iso;
+  }
+
+  return null;
+}
+
+function monthLabel(dateValue) {
+  const d = parseAnyDate(dateValue);
+  if (!d) return normalizeText(dateValue);
+  return d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+}
+
 function extractAsin(text) {
   const normalized = normalizeText(text).toUpperCase();
   const match = normalized.match(/([A-Z0-9]{10})/);
@@ -520,12 +547,6 @@ function percentChange(current, prior) {
   return ((c - p) / p) * 100;
 }
 
-function monthLabel(dateValue) {
-  const d = new Date(dateValue);
-  if (Number.isNaN(d.getTime())) return normalizeText(dateValue);
-  return d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
-}
-
 export default function App() {
   const [activeTab, setActiveTab] = useState("overview");
   const [adView, setAdView] = useState("Campaign");
@@ -891,64 +912,71 @@ export default function App() {
     }));
   }, [unifiedProductRows]);
 
-  const parentGrouped = useMemo(() => {
+  const totalSalesProducts30d = useMemo(() => {
     const map = new Map();
-    unifiedProductRows.forEach((row) => {
-      const key = `${row.adType}||${row.parentAsin || "Unmapped"}`;
-      const current = map.get(key) || {
-        adType: row.adType,
-        parentAsin: row.parentAsin || "Unmapped",
-        imageUrl: row.imageUrl,
-        impressions: 0,
-        clicks: 0,
-        spend: 0,
-        sales: 0,
-        orders: 0,
-      };
-      current.impressions += row.impressions;
-      current.clicks += row.clicks;
-      current.spend += row.spend;
-      current.sales += row.sales;
-      current.orders += row.orders;
-      map.set(key, current);
-    });
-    return [...map.values()].map((row) => ({
-      ...row,
-      ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
-      cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0,
-      acos: row.sales ? (row.spend / row.sales) * 100 : 0,
-      roas: row.spend ? row.sales / row.spend : 0,
-    }));
-  }, [unifiedProductRows]);
 
-  const itemTypeGrouped = useMemo(() => {
-    const map = new Map();
-    unifiedProductRows.forEach((row) => {
-      const key = `${row.adType}||${row.itemType || "Unmapped"}`;
-      const current = map.get(key) || {
-        adType: row.adType,
-        itemType: row.itemType || "Unmapped",
-        impressions: 0,
-        clicks: 0,
-        spend: 0,
-        sales: 0,
-        orders: 0,
+    products30dSheet.forEach((row) => {
+      const asin = normalizeText(
+        pick(row, ["(Child) ASIN", "Child ASIN", "child asin", "ASIN", "asin"], "")
+      ).toUpperCase();
+      if (!asin) return;
+
+      const ref = referenceByAsin.get(asin) || {};
+      const sales30d = normalizeNumber(
+        pick(row, ["Ordered Product Sales", "ordered product sales", "Sales", "sales"], 0)
+      );
+      const units30d = normalizeNumber(
+        pick(row, ["Units Ordered", "units ordered", "Units", "units"], 0)
+      );
+
+      const current = map.get(asin) || {
+        asin,
+        shortTitle: ref.shortTitle || asin,
+        brand: ref.brand || "Unknown",
+        parentAsin: ref.parentAsin || "",
+        itemType: ref.type || "Unknown",
+        imageUrl:
+          ref.imageUrl ||
+          `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
+        sales30d: 0,
+        units30d: 0,
       };
-      current.impressions += row.impressions;
-      current.clicks += row.clicks;
-      current.spend += row.spend;
-      current.sales += row.sales;
-      current.orders += row.orders;
-      map.set(key, current);
+
+      current.sales30d += sales30d;
+      current.units30d += units30d;
+      map.set(asin, current);
     });
-    return [...map.values()].map((row) => ({
-      ...row,
-      ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
-      cvr: row.clicks ? (row.orders / row.clicks) * 100 : 0,
-      acos: row.sales ? (row.spend / row.sales) * 100 : 0,
-      roas: row.spend ? row.sales / row.spend : 0,
-    }));
-  }, [unifiedProductRows]);
+
+    return [...map.values()];
+  }, [products30dSheet, referenceByAsin]);
+
+  const topProductsList = useMemo(() => {
+    return [...totalSalesProducts30d].sort((a, b) => b.sales30d - a.sales30d).slice(0, 5);
+  }, [totalSalesProducts30d]);
+
+  const revenueByBrand = useMemo(() => {
+    const map = new Map();
+    totalSalesProducts30d.forEach((row) => {
+      const key = row.brand || "Unknown";
+      map.set(key, (map.get(key) || 0) + row.sales30d);
+    });
+    return [...map.entries()]
+      .map(([brand, sales]) => ({ brand, sales }))
+      .sort((a, b) => b.sales - a.sales)
+      .slice(0, 8);
+  }, [totalSalesProducts30d]);
+
+  const revenueByCategory = useMemo(() => {
+    const map = new Map();
+    totalSalesProducts30d.forEach((row) => {
+      const key = row.itemType || "Unknown";
+      map.set(key, (map.get(key) || 0) + row.sales30d);
+    });
+    return [...map.entries()]
+      .map(([category, sales]) => ({ category, sales }))
+      .sort((a, b) => b.sales - a.sales)
+      .slice(0, 8);
+  }, [totalSalesProducts30d]);
 
   const adSummary = useMemo(() => {
     const spend = unifiedProductRows.reduce((sum, row) => sum + row.spend, 0);
@@ -956,52 +984,32 @@ export default function App() {
     return { spend, sales, acos: sales ? (spend / sales) * 100 : 0, roas: spend ? sales / spend : 0 };
   }, [unifiedProductRows]);
 
-  const topProductsList = useMemo(() => {
-    return [...productGrouped].sort((a, b) => b.sales - a.sales).slice(0, 5);
-  }, [productGrouped]);
-
   const salesByAsin30d = useMemo(() => {
     const map = new Map();
-    products30dSheet.forEach((row) => {
-      const asin = normalizeText(
-        pick(row, ["(Child) ASIN", "Child ASIN", "child asin", "ASIN", "asin"], "")
-      ).toUpperCase();
-      if (!asin) return;
-      const ref = referenceByAsin.get(asin) || {};
-      const unitsOrdered = normalizeNumber(
-        pick(row, ["Units Ordered", "units ordered", "Ordered Product Sales Units"], 0)
-      );
-      const current = map.get(asin) || {
-        asin,
-        shortTitle: ref.shortTitle || asin,
-        brand: ref.brand || "",
-        parentAsin: ref.parentAsin || "",
-        itemType: ref.type || "",
-        imageUrl:
-          ref.imageUrl ||
-          `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
-        units30d: 0,
-      };
-      current.units30d += unitsOrdered;
-      map.set(asin, current);
+    totalSalesProducts30d.forEach((row) => {
+      map.set(row.asin, {
+        ...row,
+        units30d: row.units30d,
+      });
     });
     return map;
-  }, [products30dSheet, referenceByAsin]);
+  }, [totalSalesProducts30d]);
 
   const monthlySales = useMemo(() => {
     const rows = salesMonthlySheet
       .map((row) => {
         const rawDate = pick(row, ["Date", "Month", "date", "month"], "");
+        const parsedDate = parseAnyDate(rawDate);
         const sales = normalizeNumber(
           pick(row, ["Ordered Product Sales", "ordered product sales", "Sales", "sales"], 0)
         );
         const units = normalizeNumber(
           pick(row, ["Units Ordered", "units ordered", "Units", "units"], 0)
         );
-        const profit = normalizeNumber(
-          pick(row, ["Profit", "profit", "Net Profit", "net profit"], 0)
-        );
-        const parsedDate = new Date(rawDate);
+        const profitRaw = pick(row, ["Profit", "profit", "Net Profit", "net profit"], null);
+        const profit = normalizeNumber(profitRaw);
+        const hasProfit = profitRaw !== null && profitRaw !== "";
+
         return {
           rawDate,
           parsedDate,
@@ -1009,16 +1017,14 @@ export default function App() {
           sales,
           units,
           profit,
-          hasProfit:
-            pick(row, ["Profit", "profit", "Net Profit", "net profit"], null) !== null &&
-            pick(row, ["Profit", "profit", "Net Profit", "net profit"], "") !== "",
+          hasProfit,
         };
       })
       .filter((row) => row.rawDate);
 
     rows.sort((a, b) => {
-      const ad = a.parsedDate instanceof Date && !Number.isNaN(a.parsedDate) ? a.parsedDate.getTime() : 0;
-      const bd = b.parsedDate instanceof Date && !Number.isNaN(b.parsedDate) ? b.parsedDate.getTime() : 0;
+      const ad = a.parsedDate ? a.parsedDate.getTime() : 0;
+      const bd = b.parsedDate ? b.parsedDate.getTime() : 0;
       return ad - bd;
     });
 
@@ -1037,14 +1043,13 @@ export default function App() {
   const previousMonthRow = monthlySales[monthlySales.length - 2] || null;
 
   const sameMonthLastYearRow = useMemo(() => {
-    if (!currentMonthRow || !currentMonthRow.parsedDate || Number.isNaN(currentMonthRow.parsedDate.getTime())) {
-      return null;
-    }
+    if (!currentMonthRow?.parsedDate) return null;
     const currentMonth = currentMonthRow.parsedDate.getMonth();
     const currentYear = currentMonthRow.parsedDate.getFullYear();
+
     return (
       monthlySales.find((row) => {
-        if (!row.parsedDate || Number.isNaN(row.parsedDate.getTime())) return false;
+        if (!row.parsedDate) return false;
         return (
           row.parsedDate.getMonth() === currentMonth &&
           row.parsedDate.getFullYear() === currentYear - 1
@@ -1063,30 +1068,6 @@ export default function App() {
     currentMonthRow?.hasProfit && sameMonthLastYearRow?.hasProfit
       ? percentChange(currentMonthRow?.profit, sameMonthLastYearRow?.profit)
       : null;
-
-  const revenueByBrand = useMemo(() => {
-    const map = new Map();
-    productGrouped.forEach((row) => {
-      const key = row.brand || "Unknown";
-      map.set(key, (map.get(key) || 0) + row.sales);
-    });
-    return [...map.entries()]
-      .map(([brand, sales]) => ({ brand, sales }))
-      .sort((a, b) => b.sales - a.sales)
-      .slice(0, 8);
-  }, [productGrouped]);
-
-  const revenueByCategory = useMemo(() => {
-    const map = new Map();
-    productGrouped.forEach((row) => {
-      const key = row.itemType || "Unknown";
-      map.set(key, (map.get(key) || 0) + row.sales);
-    });
-    return [...map.entries()]
-      .map(([category, sales]) => ({ category, sales }))
-      .sort((a, b) => b.sales - a.sales)
-      .slice(0, 8);
-  }, [productGrouped]);
 
   const fbaInventoryRows = useMemo(
     () => parseInventoryRows(inventoryFbaSheet, referenceByAsin, "fba"),
@@ -1617,12 +1598,23 @@ export default function App() {
 
           {activeTab === "overview" && (
             <div className="space-y-6">
-              <SectionCard title="Monthly Sales & Profit Trend" subtitle="Sales from sales_monthly. Profit will populate once profit data is added.">
-                <div className="h-64 w-full">
+              <SectionCard
+                title="Monthly Sales & Profit Trend"
+                subtitle="Sales from sales_monthly. Profit will populate once profit data is added."
+              >
+                <div className="h-72 w-full">
                   <ResponsiveContainer>
-                    <BarChart data={monthlySalesChartData}>
+                    <BarChart data={monthlySalesChartData} margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
                       <CartesianGrid stroke="#172033" vertical={false} />
-                      <XAxis dataKey="month" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                      <XAxis
+                        dataKey="month"
+                        stroke="#64748b"
+                        fontSize={12}
+                        tickLine={false}
+                        axisLine={false}
+                        interval={0}
+                        minTickGap={18}
+                      />
                       <YAxis
                         stroke="#64748b"
                         fontSize={12}
@@ -1644,7 +1636,7 @@ export default function App() {
                             : currency(value)
                         }
                       />
-                      <Bar dataKey="sales" radius={[8, 8, 0, 0]} fill="#334f74" />
+                      <Bar dataKey="sales" radius={[8, 8, 0, 0]} fill="#3e5a82" />
                       <Line type="monotone" dataKey="profit" stroke="#34d399" strokeWidth={2} dot={false} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -1652,24 +1644,10 @@ export default function App() {
               </SectionCard>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <StatCard
-                  label="This Month Sales"
-                  value={currentMonthRow?.sales || 0}
-                  icon={DollarSign}
-                />
-                <StatCard
-                  label="This Month Units"
-                  value={currentMonthRow?.units || 0}
-                  suffix="count"
-                  icon={Package}
-                />
+                <StatCard label="This Month Sales" value={currentMonthRow?.sales || 0} icon={DollarSign} />
+                <StatCard label="This Month Units" value={currentMonthRow?.units || 0} suffix="count" icon={Package} />
                 <StatCard label="Ad Spend" value={adSummary.spend} icon={Megaphone} />
-                <StatCard
-                  label="ROAS"
-                  value={adSummary.roas}
-                  suffix="x"
-                  icon={BarChart3}
-                />
+                <StatCard label="ROAS" value={adSummary.roas} suffix="x" icon={BarChart3} />
               </div>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1707,56 +1685,12 @@ export default function App() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                <SectionCard title="Revenue by Brand" subtitle="30 day ad sales">
-                  <div className="space-y-4">
-                    {revenueByBrand.map((row) => (
-                      <div key={row.brand}>
-                        <div className="mb-2 flex items-center justify-between gap-3">
-                          <span className="text-sm text-slate-200">{row.brand}</span>
-                          <span className="text-sm font-medium text-white">{currency(row.sales)}</span>
-                        </div>
-                        <div className="h-2 rounded-full bg-slate-900">
-                          <div
-                            className="h-2 rounded-full bg-cyan-400"
-                            style={{
-                              width: `${(row.sales / (revenueByBrand[0]?.sales || 1)) * 100}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </SectionCard>
-
-                <SectionCard title="Revenue by Category" subtitle="30 day ad sales">
-                  <div className="space-y-4">
-                    {revenueByCategory.map((row) => (
-                      <div key={row.category}>
-                        <div className="mb-2 flex items-center justify-between gap-3">
-                          <span className="text-sm text-slate-200">{row.category}</span>
-                          <span className="text-sm font-medium text-white">{currency(row.sales)}</span>
-                        </div>
-                        <div className="h-2 rounded-full bg-slate-900">
-                          <div
-                            className="h-2 rounded-full bg-emerald-400"
-                            style={{
-                              width: `${(row.sales / (revenueByCategory[0]?.sales || 1)) * 100}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </SectionCard>
-              </div>
-
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_1fr]">
-                <SectionCard title="Top Products" subtitle="Top 5 by 30 day ad sales">
+                <SectionCard title="Top Products" subtitle="Top 5 by total sales in last 30 days">
                   <div className="space-y-3">
                     {topProductsList.map((row, index) => (
                       <div
-                        key={`${row.adType}-${row.asin}`}
+                        key={row.asin}
                         className="flex items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-900/40 p-3"
                       >
                         <div className="flex min-w-0 items-center gap-3">
@@ -1772,8 +1706,8 @@ export default function App() {
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="text-sm font-semibold text-white">{currency(row.sales)}</div>
-                          <div className="mt-1 text-xs text-slate-400">{numberFmt(row.orders)} orders</div>
+                          <div className="text-sm font-semibold text-white">{currency(row.sales30d)}</div>
+                          <div className="mt-1 text-xs text-slate-400">{numberFmt(row.units30d)} units</div>
                         </div>
                       </div>
                     ))}
@@ -1801,6 +1735,46 @@ export default function App() {
                     </div>
                   </SectionCard>
                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                <SectionCard title="Revenue by Brand" subtitle="Total sales in last 30 days">
+                  <div className="space-y-4">
+                    {revenueByBrand.map((row) => (
+                      <div key={row.brand}>
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <span className="text-sm text-slate-200">{row.brand}</span>
+                          <span className="text-sm font-medium text-white">{currency(row.sales)}</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-slate-900">
+                          <div
+                            className="h-2 rounded-full bg-cyan-400"
+                            style={{ width: `${(row.sales / (revenueByBrand[0]?.sales || 1)) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </SectionCard>
+
+                <SectionCard title="Revenue by Category" subtitle="Total sales in last 30 days">
+                  <div className="space-y-4">
+                    {revenueByCategory.map((row) => (
+                      <div key={row.category}>
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <span className="text-sm text-slate-200">{row.category}</span>
+                          <span className="text-sm font-medium text-white">{currency(row.sales)}</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-slate-900">
+                          <div
+                            className="h-2 rounded-full bg-emerald-400"
+                            style={{ width: `${(row.sales / (revenueByCategory[0]?.sales || 1)) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </SectionCard>
               </div>
             </div>
           )}
@@ -1894,80 +1868,78 @@ export default function App() {
                 <StatCard label="Spend Already Protected" value={wastedSpendSummary.protectedSpend} icon={ShieldMinus} tone="emerald" />
               </div>
 
-              <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[1.2fr_1fr]">
-                <SectionCard
-                  title="Search Term Intelligence"
-                  subtitle="Shows existing negatives plus search terms with 10+ clicks and no conversions"
-                  right={<TogglePills value={searchView} onChange={setSearchView} options={["Recommended", "Existing Negatives", "All Terms"]} />}
-                >
-                  <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-4">
-                    <FilterSelect label="Ad Type" value={adType} onChange={setAdType} options={adTypeOptions} />
-                    <FilterSelect label="Brand" value={brandFilter} onChange={setBrandFilter} options={brandOptions} />
-                    <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
-                    <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
-                  </div>
+              <SectionCard
+                title="Top Waste Terms"
+                subtitle="Highest-spend search terms still recommended for negative matching"
+              >
+                <div className="h-96 w-full">
+                  <ResponsiveContainer>
+                    <BarChart data={wasteChartData} layout="vertical" margin={{ left: 10, right: 10 }}>
+                      <CartesianGrid stroke="#172033" horizontal={false} />
+                      <XAxis type="number" stroke="#64748b" tickLine={false} axisLine={false} />
+                      <YAxis
+                        type="category"
+                        dataKey="name"
+                        width={120}
+                        stroke="#64748b"
+                        tickLine={false}
+                        axisLine={false}
+                        fontSize={12}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          background: "#020617",
+                          border: "1px solid #1e293b",
+                          borderRadius: 16,
+                        }}
+                        formatter={(v) => currency(v)}
+                      />
+                      <Bar dataKey="spend" radius={[0, 8, 8, 0]} fill="#f59e0b" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </SectionCard>
 
-                  {searchView === "Recommended" && (
-                    <SortableTable
-                      rowKey={(row, i) => `${row.adType}-${row.searchTerm}-${i}`}
-                      columns={recommendedColumns}
-                      rows={recommendedSort.sortedRows}
-                      sortConfig={recommendedSort.sortConfig}
-                      onSort={recommendedSort.handleSort}
-                    />
-                  )}
-                  {searchView === "Existing Negatives" && (
-                    <SortableTable
-                      rowKey={(row, i) => `${row.adType}-${row.term}-${i}`}
-                      columns={existingNegativeColumns}
-                      rows={existingNegativeSort.sortedRows}
-                      sortConfig={existingNegativeSort.sortConfig}
-                      onSort={existingNegativeSort.handleSort}
-                    />
-                  )}
-                  {searchView === "All Terms" && (
-                    <SortableTable
-                      rowKey={(row, i) => `${row.adType}-${row.searchTerm}-${i}`}
-                      columns={allSearchTermColumns}
-                      rows={allSearchTermSort.sortedRows}
-                      sortConfig={allSearchTermSort.sortConfig}
-                      onSort={allSearchTermSort.handleSort}
-                    />
-                  )}
-                </SectionCard>
+              <SectionCard
+                title="Search Term Intelligence"
+                subtitle="Shows existing negatives plus search terms with 10+ clicks and no conversions"
+                right={<TogglePills value={searchView} onChange={setSearchView} options={["Recommended", "Existing Negatives", "All Terms"]} />}
+              >
+                <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-4">
+                  <FilterSelect label="Ad Type" value={adType} onChange={setAdType} options={adTypeOptions} />
+                  <FilterSelect label="Brand" value={brandFilter} onChange={setBrandFilter} options={brandOptions} />
+                  <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
+                  <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
+                </div>
 
-                <SectionCard
-                  title="Top Waste Terms"
-                  subtitle="Highest-spend search terms still recommended for negative matching"
-                >
-                  <div className="h-96 w-full">
-                    <ResponsiveContainer>
-                      <BarChart data={wasteChartData} layout="vertical" margin={{ left: 10, right: 10 }}>
-                        <CartesianGrid stroke="#172033" horizontal={false} />
-                        <XAxis type="number" stroke="#64748b" tickLine={false} axisLine={false} />
-                        <YAxis
-                          type="category"
-                          dataKey="name"
-                          width={120}
-                          stroke="#64748b"
-                          tickLine={false}
-                          axisLine={false}
-                          fontSize={12}
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            background: "#020617",
-                            border: "1px solid #1e293b",
-                            borderRadius: 16,
-                          }}
-                          formatter={(v) => currency(v)}
-                        />
-                        <Bar dataKey="spend" radius={[0, 8, 8, 0]} fill="#f59e0b" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </SectionCard>
-              </div>
+                {searchView === "Recommended" && (
+                  <SortableTable
+                    rowKey={(row, i) => `${row.adType}-${row.searchTerm}-${i}`}
+                    columns={recommendedColumns}
+                    rows={recommendedSort.sortedRows}
+                    sortConfig={recommendedSort.sortConfig}
+                    onSort={recommendedSort.handleSort}
+                  />
+                )}
+                {searchView === "Existing Negatives" && (
+                  <SortableTable
+                    rowKey={(row, i) => `${row.adType}-${row.term}-${i}`}
+                    columns={existingNegativeColumns}
+                    rows={existingNegativeSort.sortedRows}
+                    sortConfig={existingNegativeSort.sortConfig}
+                    onSort={existingNegativeSort.handleSort}
+                  />
+                )}
+                {searchView === "All Terms" && (
+                  <SortableTable
+                    rowKey={(row, i) => `${row.adType}-${row.searchTerm}-${i}`}
+                    columns={allSearchTermColumns}
+                    rows={allSearchTermSort.sortedRows}
+                    sortConfig={allSearchTermSort.sortConfig}
+                    onSort={allSearchTermSort.handleSort}
+                  />
+                )}
+              </SectionCard>
             </div>
           )}
 
