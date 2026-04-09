@@ -891,6 +891,85 @@ export default function App() {
     }));
   }, [unifiedProductRows]);
 
+  const competitorTargets = useMemo(() => {
+    const rows = spCampaignSheet
+      .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "product targeting")
+      .filter((row) => {
+        const expr = normalizeText(
+          pick(row, [
+            "Resolved Product Targeting Expression (Informational only)",
+            "Product Targeting Expression",
+          ], "")
+        ).toLowerCase();
+        return expr.includes("asin=") || expr.includes("asin-expanded=");
+      });
+
+    const map = new Map();
+
+    rows.forEach((row) => {
+      const rawExpr = normalizeText(
+        pick(row, [
+          "Resolved Product Targeting Expression (Informational only)",
+          "Product Targeting Expression",
+        ], "")
+      );
+      const expr = rawExpr.toLowerCase();
+      const asinMatch = expr.match(/asin(?:-expanded)?=\"?([a-z0-9]{10})\"?/i);
+      if (!asinMatch) return;
+
+      const targetAsin = asinMatch[1].toUpperCase();
+      const ref = referenceByAsin.get(targetAsin) || {};
+      const spend = normalizeNumber(pick(row, ["Spend"], 0));
+      const sales = normalizeNumber(pick(row, ["Sales"], 0));
+      const orders = normalizeNumber(pick(row, ["Orders"], 0));
+      const clicks = normalizeNumber(pick(row, ["Clicks"], 0));
+      const impressions = normalizeNumber(pick(row, ["Impressions"], 0));
+
+      const current = map.get(targetAsin) || {
+        asin: targetAsin,
+        shortTitle: ref.shortTitle || targetAsin,
+        brand: ref.brand || "",
+        itemType: ref.type || "",
+        imageUrl:
+          ref.imageUrl ||
+          `https://images-na.ssl-images-amazon.com/images/P/${targetAsin}.01._SL120_.jpg`,
+        campaignName: normalizeText(
+          pick(row, ["Campaign Name (Informational only)", "Campaign Name"], "—")
+        ),
+        adGroupName: normalizeText(
+          pick(row, ["Ad Group Name (Informational only)", "Ad Group Name"], "—")
+        ),
+        state: normalizeText(pick(row, ["State"], "—")),
+        impressions: 0,
+        clicks: 0,
+        spend: 0,
+        sales: 0,
+        orders: 0,
+      };
+
+      current.impressions += impressions;
+      current.clicks += clicks;
+      current.spend += spend;
+      current.sales += sales;
+      current.orders += orders;
+      map.set(targetAsin, current);
+    });
+
+    return [...map.values()]
+      .map((row) => ({
+        ...row,
+        ctr: row.impressions ? (row.clicks / row.impressions) * 100 : 0,
+        acos: row.sales ? (row.spend / row.sales) * 100 : 0,
+        roas: row.spend ? row.sales / row.spend : 0,
+      }))
+      .filter((row) =>
+        !query ||
+        `${row.asin} ${row.shortTitle} ${row.campaignName} ${row.adGroupName} ${row.brand} ${row.itemType}`
+          .toLowerCase()
+          .includes(query.toLowerCase())
+      );
+  }, [spCampaignSheet, referenceByAsin, query]);
+
   const parentGrouped = useMemo(() => {
     const map = new Map();
     unifiedProductRows.forEach((row) => {
@@ -1492,6 +1571,40 @@ const revenueByCategory = useMemo(() => {
     { key: "roas", label: "ROAS", type: "number", render: (r) => `${r.roas.toFixed(2)}x` },
   ];
 
+  const targetingColumns = [
+    {
+      key: "asin",
+      label: "Targeted ASIN",
+      type: "text",
+      sortAccessor: (r) => `${r.asin} ${r.shortTitle}`,
+      render: (r) => (
+        <div className="flex items-center gap-3">
+          <AsinImage src={r.imageUrl} title={r.shortTitle} />
+          <div>
+            <a
+              href={`https://www.amazon.com/dp/${r.asin}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-cyan-300 hover:underline"
+            >
+              {r.asin}
+            </a>
+            <div className="text-xs text-slate-400">{r.shortTitle}</div>
+          </div>
+        </div>
+      ),
+    },
+    { key: "brand", label: "Brand", type: "text" },
+    { key: "itemType", label: "Item Type", type: "text" },
+    { key: "campaignName", label: "Campaign", type: "text" },
+    { key: "clicks", label: "Clicks", type: "number", render: (r) => numberFmt(r.clicks) },
+    { key: "spend", label: "Spend", type: "number", render: (r) => currency(r.spend) },
+    { key: "sales", label: "Sales", type: "number", render: (r) => currency(r.sales) },
+    { key: "orders", label: "Orders", type: "number", render: (r) => numberFmt(r.orders) },
+    { key: "acos", label: "ACOS", type: "number", render: (r) => pct(r.acos) },
+    { key: "roas", label: "ROAS", type: "number", render: (r) => `${r.roas.toFixed(2)}x` },
+  ];
+
   const inventoryColumns = [
     {
       key: "asin",
@@ -1575,10 +1688,25 @@ const revenueByCategory = useMemo(() => {
   const recommendedSort = useSortableRows(recommendedNegatives, { key: "spend", type: "number", direction: "desc" });
   const existingNegativeSort = useSortableRows(existingNegatives, { key: "term", type: "text", direction: "asc" });
   const allSearchTermSort = useSortableRows(unifiedSearchTerms, { key: "spend", type: "number", direction: "desc" });
+  const targetingSort = useSortableRows(competitorTargets, { key: "spend", type: "number", direction: "desc" });
+
+  const targetingSummary = useMemo(() => {
+    const spend = competitorTargets.reduce((sum, row) => sum + row.spend, 0);
+    const sales = competitorTargets.reduce((sum, row) => sum + row.sales, 0);
+    const orders = competitorTargets.reduce((sum, row) => sum + row.orders, 0);
+    return {
+      count: competitorTargets.length,
+      spend,
+      sales,
+      orders,
+      acos: sales ? (spend / sales) * 100 : 0,
+    };
+  }, [competitorTargets]);
 
   const tabs = [
     { id: "overview", label: "Overview", icon: DollarSign },
     { id: "advertising", label: "Advertising", icon: Megaphone },
+    { id: "targeting", label: "Targeting", icon: Search },
     { id: "searchTerms", label: "Search Terms", icon: ShieldMinus },
     { id: "inventory", label: "Inventory", icon: Warehouse },
     { id: "catalog", label: "Catalog", icon: Package },
@@ -1924,6 +2052,30 @@ const revenueByCategory = useMemo(() => {
                     onSort={itemTypeSort.handleSort}
                   />
                 )}
+              </SectionCard>
+            </div>
+          )}
+
+          {activeTab === "targeting" && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <CountCard label="Competitor Targets" value={targetingSummary.count} icon={Search} tone="cyan" />
+                <StatCard label="Spend" value={targetingSummary.spend} icon={Megaphone} tone="amber" />
+                <StatCard label="Sales" value={targetingSummary.sales} icon={DollarSign} tone="emerald" />
+                <StatCard label="ACOS" value={targetingSummary.acos} suffix="%" icon={BarChart3} tone="rose" />
+              </div>
+
+              <SectionCard
+                title="Competitor ASIN Targeting"
+                subtitle="Manual product targets currently aimed at competitor ASINs"
+              >
+                <SortableTable
+                  rowKey={(row) => row.asin}
+                  columns={targetingColumns}
+                  rows={targetingSort.sortedRows}
+                  sortConfig={targetingSort.sortConfig}
+                  onSort={targetingSort.handleSort}
+                />
               </SectionCard>
             </div>
           )}
