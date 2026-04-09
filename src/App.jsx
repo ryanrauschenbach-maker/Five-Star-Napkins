@@ -970,6 +970,104 @@ export default function App() {
       );
   }, [spCampaignSheet, referenceByAsin, query]);
 
+  const autoCampaignTargets = useMemo(() => {
+    return spCampaignSheet
+      .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
+      .filter((row) => normalizeText(pick(row, ["Targeting Type"], "")).toLowerCase() === "auto")
+      .map((row) => {
+        const impressions = normalizeNumber(pick(row, ["Impressions"], 0));
+        const clicks = normalizeNumber(pick(row, ["Clicks"], 0));
+        const spend = normalizeNumber(pick(row, ["Spend"], 0));
+        const sales = normalizeNumber(pick(row, ["Sales"], 0));
+        const orders = normalizeNumber(pick(row, ["Orders"], 0));
+        return {
+          campaignName: normalizeText(pick(row, ["Campaign Name", "Campaign Name (Informational only)"], "—")),
+          state: normalizeText(pick(row, ["State"], "—")),
+          impressions,
+          clicks,
+          spend,
+          sales,
+          orders,
+          ctr: impressions ? (clicks / impressions) * 100 : 0,
+          acos: sales ? (spend / sales) * 100 : 0,
+          roas: spend ? sales / spend : 0,
+        };
+      })
+      .filter((row) =>
+        !query ||
+        `${row.campaignName} ${row.state}`.toLowerCase().includes(query.toLowerCase())
+      )
+      .sort((a, b) => b.spend - a.spend);
+  }, [spCampaignSheet, query]);
+
+  const negativeProductTargets = useMemo(() => {
+    const rows = spCampaignSheet.filter((row) => {
+      const entity = normalizeText(pick(row, ["Entity", "entity"])).toLowerCase();
+      return entity === "negative product targeting" || entity === "campaign negative product targeting";
+    });
+
+    const map = new Map();
+
+    rows.forEach((row) => {
+      const rawExpr = normalizeText(
+        pick(row, [
+          "Resolved Product Targeting Expression (Informational only)",
+          "Product Targeting Expression",
+        ], "")
+      );
+      const expr = rawExpr.toLowerCase();
+      const asinMatch = expr.match(/asin(?:-expanded)?=\"?([a-z0-9]{10})\"?/i);
+      const targetAsin = asinMatch ? asinMatch[1].toUpperCase() : rawExpr || "Unknown";
+
+      const ref = asinMatch ? (referenceByAsin.get(targetAsin) || {}) : {};
+      const key = `${targetAsin}||${normalizeText(pick(row, ["Campaign Name (Informational only)", "Campaign Name"], "—"))}||${normalizeText(pick(row, ["Ad Group Name (Informational only)", "Ad Group Name"], "—"))}`;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          asin: targetAsin,
+          shortTitle: ref.shortTitle || targetAsin,
+          brand: ref.brand || "",
+          itemType: ref.type || "",
+          imageUrl:
+            asinMatch
+              ? (ref.imageUrl || `https://images-na.ssl-images-amazon.com/images/P/${targetAsin}.01._SL120_.jpg`)
+              : "",
+          campaignName: normalizeText(
+            pick(row, ["Campaign Name (Informational only)", "Campaign Name"], "—")
+          ),
+          adGroupName: normalizeText(
+            pick(row, ["Ad Group Name (Informational only)", "Ad Group Name"], "—")
+          ),
+          state: normalizeText(pick(row, ["State"], "—")),
+          expression: rawExpr || "—",
+        });
+      }
+    });
+
+    return [...map.values()]
+      .filter((row) =>
+        !query ||
+        `${row.asin} ${row.shortTitle} ${row.campaignName} ${row.adGroupName} ${row.expression}`
+          .toLowerCase()
+          .includes(query.toLowerCase())
+      )
+      .sort((a, b) => a.campaignName.localeCompare(b.campaignName));
+  }, [spCampaignSheet, referenceByAsin, query]);
+
+  const targetingInsights = useMemo(() => {
+    const highSpendNoOrders = [...competitorTargets]
+      .filter((row) => row.spend >= 25 && row.orders === 0)
+      .sort((a, b) => b.spend - a.spend)
+      .slice(0, 5);
+
+    const bestRoas = [...competitorTargets]
+      .filter((row) => row.orders > 0 && row.spend >= 10)
+      .sort((a, b) => b.roas - a.roas)
+      .slice(0, 5);
+
+    return { highSpendNoOrders, bestRoas };
+  }, [competitorTargets]);
+
   const parentGrouped = useMemo(() => {
     const map = new Map();
     unifiedProductRows.forEach((row) => {
@@ -1605,6 +1703,52 @@ const revenueByCategory = useMemo(() => {
     { key: "roas", label: "ROAS", type: "number", render: (r) => `${r.roas.toFixed(2)}x` },
   ];
 
+  const autoTargetColumns = [
+    { key: "campaignName", label: "Auto Campaign", type: "text" },
+    { key: "state", label: "State", type: "text" },
+    { key: "impressions", label: "Impr.", type: "number", render: (r) => compactNumber(r.impressions) },
+    { key: "clicks", label: "Clicks", type: "number", render: (r) => numberFmt(r.clicks) },
+    { key: "spend", label: "Spend", type: "number", render: (r) => currency(r.spend) },
+    { key: "sales", label: "Sales", type: "number", render: (r) => currency(r.sales) },
+    { key: "orders", label: "Orders", type: "number", render: (r) => numberFmt(r.orders) },
+    { key: "ctr", label: "CTR", type: "number", render: (r) => pct(r.ctr) },
+    { key: "acos", label: "ACOS", type: "number", render: (r) => pct(r.acos) },
+    { key: "roas", label: "ROAS", type: "number", render: (r) => `${r.roas.toFixed(2)}x` },
+  ];
+
+  const negativeTargetColumns = [
+    {
+      key: "asin",
+      label: "Negative Target",
+      type: "text",
+      sortAccessor: (r) => `${r.asin} ${r.shortTitle}`,
+      render: (r) => (
+        <div className="flex items-center gap-3">
+          <AsinImage src={r.imageUrl} title={r.shortTitle} />
+          <div>
+            {r.asin && /^[A-Z0-9]{10}$/.test(r.asin) ? (
+              <a
+                href={`https://www.amazon.com/dp/${r.asin}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-cyan-300 hover:underline"
+              >
+                {r.asin}
+              </a>
+            ) : (
+              <div className="font-medium text-cyan-300">{r.asin}</div>
+            )}
+            <div className="text-xs text-slate-400">{r.shortTitle}</div>
+          </div>
+        </div>
+      ),
+    },
+    { key: "campaignName", label: "Campaign", type: "text" },
+    { key: "adGroupName", label: "Ad Group", type: "text" },
+    { key: "state", label: "State", type: "text" },
+    { key: "expression", label: "Expression", type: "text" },
+  ];
+
   const inventoryColumns = [
     {
       key: "asin",
@@ -1689,19 +1833,29 @@ const revenueByCategory = useMemo(() => {
   const existingNegativeSort = useSortableRows(existingNegatives, { key: "term", type: "text", direction: "asc" });
   const allSearchTermSort = useSortableRows(unifiedSearchTerms, { key: "spend", type: "number", direction: "desc" });
   const targetingSort = useSortableRows(competitorTargets, { key: "spend", type: "number", direction: "desc" });
+  const autoTargetSort = useSortableRows(autoCampaignTargets, { key: "spend", type: "number", direction: "desc" });
+  const negativeTargetSort = useSortableRows(negativeProductTargets, { key: "campaignName", type: "text", direction: "asc" });
 
   const targetingSummary = useMemo(() => {
-    const spend = competitorTargets.reduce((sum, row) => sum + row.spend, 0);
-    const sales = competitorTargets.reduce((sum, row) => sum + row.sales, 0);
+    const competitorSpend = competitorTargets.reduce((sum, row) => sum + row.spend, 0);
+    const competitorSales = competitorTargets.reduce((sum, row) => sum + row.sales, 0);
     const orders = competitorTargets.reduce((sum, row) => sum + row.orders, 0);
+    const autoSpend = autoCampaignTargets.reduce((sum, row) => sum + row.spend, 0);
+    const autoSales = autoCampaignTargets.reduce((sum, row) => sum + row.sales, 0);
     return {
       count: competitorTargets.length,
-      spend,
-      sales,
+      spend: competitorSpend,
+      sales: competitorSales,
       orders,
-      acos: sales ? (spend / sales) * 100 : 0,
+      acos: competitorSales ? (competitorSpend / competitorSales) * 100 : 0,
+      autoCount: autoCampaignTargets.length,
+      autoSpend,
+      autoSales,
+      negativeCount: negativeProductTargets.length,
+      blendedSpend: competitorSpend + autoSpend,
+      blendedSales: competitorSales + autoSales,
     };
-  }, [competitorTargets]);
+  }, [competitorTargets, autoCampaignTargets, negativeProductTargets]);
 
   const tabs = [
     { id: "overview", label: "Overview", icon: DollarSign },
@@ -2058,11 +2212,93 @@ const revenueByCategory = useMemo(() => {
 
           {activeTab === "targeting" && (
             <div className="space-y-6">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
                 <CountCard label="Competitor Targets" value={targetingSummary.count} icon={Search} tone="cyan" />
-                <StatCard label="Spend" value={targetingSummary.spend} icon={Megaphone} tone="amber" />
-                <StatCard label="Sales" value={targetingSummary.sales} icon={DollarSign} tone="emerald" />
-                <StatCard label="ACOS" value={targetingSummary.acos} suffix="%" icon={BarChart3} tone="rose" />
+                <StatCard label="Competitor Spend" value={targetingSummary.spend} icon={Megaphone} tone="amber" />
+                <StatCard label="Competitor Sales" value={targetingSummary.sales} icon={DollarSign} tone="emerald" />
+                <StatCard label="Competitor ACOS" value={targetingSummary.acos} suffix="%" icon={BarChart3} tone="rose" />
+                <CountCard label="Auto Campaigns" value={targetingSummary.autoCount} icon={RefreshCw} tone="cyan" />
+                <CountCard label="Negative Product Targets" value={targetingSummary.negativeCount} icon={Ban} tone="amber" />
+              </div>
+
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                <SectionCard
+                  title="High-Spend / No-Order Targets"
+                  subtitle="Competitor ASIN targets that have spent meaningfully without converting"
+                >
+                  <div className="space-y-3">
+                    {targetingInsights.highSpendNoOrders.length === 0 ? (
+                      <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-4 text-sm text-emerald-300">
+                        No competitor targets currently meet the high-spend / no-order threshold.
+                      </div>
+                    ) : (
+                      targetingInsights.highSpendNoOrders.map((row) => (
+                        <div
+                          key={`waste-${row.asin}`}
+                          className="flex items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-900/40 p-3"
+                        >
+                          <div className="flex min-w-0 items-center gap-3">
+                            <AsinImage src={row.imageUrl} title={row.shortTitle} />
+                            <div className="min-w-0">
+                              <a
+                                href={`https://www.amazon.com/dp/${row.asin}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="truncate font-medium text-cyan-300 hover:underline"
+                              >
+                                {row.asin}
+                              </a>
+                              <div className="truncate text-xs text-slate-400">{row.shortTitle}</div>
+                            </div>
+                          </div>
+                          <div className="text-right text-sm">
+                            <div className="font-semibold text-white">{currency(row.spend)}</div>
+                            <div className="text-xs text-slate-400">0 orders</div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  title="Best ROAS Competitor Targets"
+                  subtitle="Current winners worth watching for scale opportunities"
+                >
+                  <div className="space-y-3">
+                    {targetingInsights.bestRoas.length === 0 ? (
+                      <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-300">
+                        No competitor targets with enough spend and orders yet.
+                      </div>
+                    ) : (
+                      targetingInsights.bestRoas.map((row) => (
+                        <div
+                          key={`winner-${row.asin}`}
+                          className="flex items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-900/40 p-3"
+                        >
+                          <div className="flex min-w-0 items-center gap-3">
+                            <AsinImage src={row.imageUrl} title={row.shortTitle} />
+                            <div className="min-w-0">
+                              <a
+                                href={`https://www.amazon.com/dp/${row.asin}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="truncate font-medium text-cyan-300 hover:underline"
+                              >
+                                {row.asin}
+                              </a>
+                              <div className="truncate text-xs text-slate-400">{row.shortTitle}</div>
+                            </div>
+                          </div>
+                          <div className="text-right text-sm">
+                            <div className="font-semibold text-white">{row.roas.toFixed(2)}x ROAS</div>
+                            <div className="text-xs text-slate-400">{currency(row.sales)} sales</div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </SectionCard>
               </div>
 
               <SectionCard
@@ -2075,6 +2311,32 @@ const revenueByCategory = useMemo(() => {
                   rows={targetingSort.sortedRows}
                   sortConfig={targetingSort.sortConfig}
                   onSort={targetingSort.handleSort}
+                />
+              </SectionCard>
+
+              <SectionCard
+                title="Auto Campaign Performance"
+                subtitle="Auto campaigns shown here so targeting strategy can be reviewed alongside competitor ASIN targeting"
+              >
+                <SortableTable
+                  rowKey={(row) => row.campaignName}
+                  columns={autoTargetColumns}
+                  rows={autoTargetSort.sortedRows}
+                  sortConfig={autoTargetSort.sortConfig}
+                  onSort={autoTargetSort.handleSort}
+                />
+              </SectionCard>
+
+              <SectionCard
+                title="Negative Product Targets"
+                subtitle="ASINs currently excluded from Sponsored Products campaigns and ad groups"
+              >
+                <SortableTable
+                  rowKey={(row, idx) => `${row.asin}-${row.campaignName}-${row.adGroupName}-${idx}`}
+                  columns={negativeTargetColumns}
+                  rows={negativeTargetSort.sortedRows}
+                  sortConfig={negativeTargetSort.sortConfig}
+                  onSort={negativeTargetSort.handleSort}
                 />
               </SectionCard>
             </div>
