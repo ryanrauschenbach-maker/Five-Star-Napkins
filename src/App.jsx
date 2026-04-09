@@ -1937,7 +1937,39 @@ const revenueByCategory = useMemo(() => {
                 <StatCard label="Spend Already Protected" value={wastedSpendSummary.protectedSpend} icon={ShieldMinus} tone="emerald" />
               </div>
 
-              <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[1.2fr_1fr]">
+              <div className="space-y-6">
+                <SectionCard
+                  title="Top Waste Terms"
+                  subtitle="Highest-spend search terms still recommended for negative matching"
+                >
+                  <div className="h-96 w-full">
+                    <ResponsiveContainer>
+                      <BarChart data={wasteChartData} layout="vertical" margin={{ left: 10, right: 10 }}>
+                        <CartesianGrid stroke="#172033" horizontal={false} />
+                        <XAxis type="number" stroke="#64748b" tickLine={false} axisLine={false} />
+                        <YAxis
+                          type="category"
+                          dataKey="name"
+                          width={120}
+                          stroke="#64748b"
+                          tickLine={false}
+                          axisLine={false}
+                          fontSize={12}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            background: "#020617",
+                            border: "1px solid #1e293b",
+                            borderRadius: 16,
+                          }}
+                          formatter={(v) => currency(v)}
+                        />
+                        <Bar dataKey="spend" radius={[0, 8, 8, 0]} fill="#f59e0b" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </SectionCard>
+
                 <SectionCard
                   title="Search Term Intelligence"
                   subtitle="Shows existing negatives plus search terms with 10+ clicks and no conversions"
@@ -1977,38 +2009,6 @@ const revenueByCategory = useMemo(() => {
                       onSort={allSearchTermSort.handleSort}
                     />
                   )}
-                </SectionCard>
-
-                <SectionCard
-                  title="Top Waste Terms"
-                  subtitle="Highest-spend search terms still recommended for negative matching"
-                >
-                  <div className="h-96 w-full">
-                    <ResponsiveContainer>
-                      <BarChart data={wasteChartData} layout="vertical" margin={{ left: 10, right: 10 }}>
-                        <CartesianGrid stroke="#172033" horizontal={false} />
-                        <XAxis type="number" stroke="#64748b" tickLine={false} axisLine={false} />
-                        <YAxis
-                          type="category"
-                          dataKey="name"
-                          width={120}
-                          stroke="#64748b"
-                          tickLine={false}
-                          axisLine={false}
-                          fontSize={12}
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            background: "#020617",
-                            border: "1px solid #1e293b",
-                            borderRadius: 16,
-                          }}
-                          formatter={(v) => currency(v)}
-                        />
-                        <Bar dataKey="spend" radius={[0, 8, 8, 0]} fill="#f59e0b" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
                 </SectionCard>
               </div>
             </div>
