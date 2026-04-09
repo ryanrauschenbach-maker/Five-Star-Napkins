@@ -956,12 +956,6 @@ export default function App() {
     return { spend, sales, acos: sales ? (spend / sales) * 100 : 0, roas: spend ? sales / spend : 0 };
   }, [unifiedProductRows]);
 
-const topProductsList = useMemo(() => {
-  return [...totalSalesProducts30d]
-    .sort((a, b) => b.sales30d - a.sales30d)
-    .slice(0, 5);
-}, [totalSalesProducts30d]);
-
   const salesByAsin30d = useMemo(() => {
     const map = new Map();
     products30dSheet.forEach((row) => {
@@ -1030,6 +1024,13 @@ const totalSalesProducts30d = useMemo(() => {
 
   return [...map.values()];
 }, [products30dSheet, referenceByAsin]);
+
+const topProductsList = useMemo(() => {
+  return [...totalSalesProducts30d]
+    .sort((a, b) => b.sales30d - a.sales30d)
+    .slice(0, 5);
+}, [totalSalesProducts30d]);
+
   const monthlySales = useMemo(() => {
     const rows = salesMonthlySheet
       .map((row) => {
@@ -1750,13 +1751,13 @@ const revenueByCategory = useMemo(() => {
               </div>
 
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                <SectionCard title="Revenue by Brand" subtitle="30 day ad sales">
+                <SectionCard title="Revenue by Brand" subtitle="30 day total sales">
                   <div className="space-y-4">
                     {revenueByBrand.map((row) => (
                       <div key={row.brand}>
                         <div className="mb-2 flex items-center justify-between gap-3">
                           <span className="text-sm text-slate-200">{row.brand}</span>
-                          <span className="text-sm font-medium text-white">{currency(row.sales30d)}</span>
+                          <span className="text-sm font-medium text-white">{currency(row.sales)}</span>
                         </div>
                         <div className="h-2 rounded-full bg-slate-900">
                           <div
@@ -1771,7 +1772,7 @@ const revenueByCategory = useMemo(() => {
                   </div>
                 </SectionCard>
 
-                <SectionCard title="Revenue by Category" subtitle="30 day ad sales">
+                <SectionCard title="Revenue by Category" subtitle="30 day total sales">
                   <div className="space-y-4">
                     {revenueByCategory.map((row) => (
                       <div key={row.category}>
@@ -1794,7 +1795,7 @@ const revenueByCategory = useMemo(() => {
               </div>
 
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_1fr]">
-                <SectionCard title="Top Products" subtitle="Top 5 by 30 day ad sales">
+                <SectionCard title="Top Products" subtitle="Top 5 by 30 day total sales">
                   <div className="space-y-3">
                     {topProductsList.map((row, index) => (
                       <div
@@ -1814,7 +1815,7 @@ const revenueByCategory = useMemo(() => {
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="text-sm font-semibold text-white">{currency(row.sales)}</div>
+                          <div className="text-sm font-semibold text-white">{currency(row.sales30d)}</div>
                           <div className="mt-1 text-xs text-slate-400">{numberFmt(row.units30d)} units</div>
                         </div>
                       </div>
