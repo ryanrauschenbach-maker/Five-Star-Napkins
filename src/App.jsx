@@ -956,9 +956,11 @@ export default function App() {
     return { spend, sales, acos: sales ? (spend / sales) * 100 : 0, roas: spend ? sales / spend : 0 };
   }, [unifiedProductRows]);
 
-  const topProductsList = useMemo(() => {
-    return [...productGrouped].sort((a, b) => b.sales - a.sales).slice(0, 5);
-  }, [productGrouped]);
+const topProductsList = useMemo(() => {
+  return [...totalSalesProducts30d]
+    .sort((a, b) => b.sales30d - a.sales30d)
+    .slice(0, 5);
+}, [totalSalesProducts30d]);
 
   const salesByAsin30d = useMemo(() => {
     const map = new Map();
@@ -987,7 +989,47 @@ export default function App() {
     });
     return map;
   }, [products30dSheet, referenceByAsin]);
+const totalSalesProducts30d = useMemo(() => {
+  const map = new Map();
 
+  products30dSheet.forEach((row) => {
+    const asin = normalizeText(
+      pick(row, ["(Child) ASIN", "Child ASIN", "child asin", "ASIN", "asin"], "")
+    ).toUpperCase();
+
+    if (!asin) return;
+
+    const ref = referenceByAsin.get(asin) || {};
+
+    const sales30d = normalizeNumber(
+      pick(row, ["Ordered Product Sales", "ordered product sales", "Sales", "sales"], 0)
+    );
+
+    const units30d = normalizeNumber(
+      pick(row, ["Units Ordered", "units ordered", "Units", "units"], 0)
+    );
+
+    const current = map.get(asin) || {
+      asin,
+      shortTitle: ref.shortTitle || asin,
+      brand: ref.brand || "Unknown",
+      parentAsin: ref.parentAsin || "",
+      itemType: ref.type || "Unknown",
+      imageUrl:
+        ref.imageUrl ||
+        `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._SL120_.jpg`,
+      sales30d: 0,
+      units30d: 0,
+    };
+
+    current.sales30d += sales30d;
+    current.units30d += units30d;
+
+    map.set(asin, current);
+  });
+
+  return [...map.values()];
+}, [products30dSheet, referenceByAsin]);
   const monthlySales = useMemo(() => {
     const rows = salesMonthlySheet
       .map((row) => {
@@ -1064,30 +1106,30 @@ export default function App() {
       ? percentChange(currentMonthRow?.profit, sameMonthLastYearRow?.profit)
       : null;
 
-  const revenueByBrand = useMemo(() => {
-    const map = new Map();
-    productGrouped.forEach((row) => {
-      const key = row.brand || "Unknown";
-      map.set(key, (map.get(key) || 0) + row.sales);
-    });
-    return [...map.entries()]
-      .map(([brand, sales]) => ({ brand, sales }))
-      .sort((a, b) => b.sales - a.sales)
-      .slice(0, 8);
-  }, [productGrouped]);
-
-  const revenueByCategory = useMemo(() => {
-    const map = new Map();
-    productGrouped.forEach((row) => {
-      const key = row.itemType || "Unknown";
-      map.set(key, (map.get(key) || 0) + row.sales);
-    });
-    return [...map.entries()]
-      .map(([category, sales]) => ({ category, sales }))
-      .sort((a, b) => b.sales - a.sales)
-      .slice(0, 8);
-  }, [productGrouped]);
-
+const revenueByBrand = useMemo(() => {
+  const map = new Map();
+  totalSalesProducts30d.forEach((row) => {
+    const key = row.brand || "Unknown";
+    map.set(key, (map.get(key) || 0) + row.sales30d);
+  });
+  return [...map.entries()]
+    .map(([brand, sales]) => ({ brand, sales }))
+    .sort((a, b) => b.sales - a.sales)
+    .slice(0, 8);
+}, [totalSalesProducts30d]);
+  
+const revenueByCategory = useMemo(() => {
+  const map = new Map();
+  totalSalesProducts30d.forEach((row) => {
+    const key = row.itemType || "Unknown";
+    map.set(key, (map.get(key) || 0) + row.sales30d);
+  });
+  return [...map.entries()]
+    .map(([category, sales]) => ({ category, sales }))
+    .sort((a, b) => b.sales - a.sales)
+    .slice(0, 8);
+}, [totalSalesProducts30d]);
+  
   const fbaInventoryRows = useMemo(
     () => parseInventoryRows(inventoryFbaSheet, referenceByAsin, "fba"),
     [inventoryFbaSheet, referenceByAsin]
@@ -1714,7 +1756,7 @@ export default function App() {
                       <div key={row.brand}>
                         <div className="mb-2 flex items-center justify-between gap-3">
                           <span className="text-sm text-slate-200">{row.brand}</span>
-                          <span className="text-sm font-medium text-white">{currency(row.sales)}</span>
+                          <span className="text-sm font-medium text-white">{currency(row.sales30d)}</span>
                         </div>
                         <div className="h-2 rounded-full bg-slate-900">
                           <div
@@ -1773,7 +1815,7 @@ export default function App() {
                         </div>
                         <div className="text-right">
                           <div className="text-sm font-semibold text-white">{currency(row.sales)}</div>
-                          <div className="mt-1 text-xs text-slate-400">{numberFmt(row.orders)} orders</div>
+                          <div className="mt-1 text-xs text-slate-400">{numberFmt(row.units30d)} units</div>
                         </div>
                       </div>
                     ))}
