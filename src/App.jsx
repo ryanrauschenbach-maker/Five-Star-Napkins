@@ -990,14 +990,11 @@ export default function App() {
 
   const totalSalesProducts30d = useMemo(() => {
     const map = new Map();
-
     products30dSheet.forEach((row) => {
       const asin = normalizeText(
         pick(row, ["(Child) ASIN", "Child ASIN", "child asin", "ASIN", "asin"], "")
       ).toUpperCase();
-
       if (!asin) return;
-
       const ref = referenceByAsin.get(asin) || {};
       const sales30d = normalizeNumber(
         pick(row, ["Ordered Product Sales", "ordered product sales", "Sales", "sales"], 0)
@@ -1005,7 +1002,6 @@ export default function App() {
       const units30d = normalizeNumber(
         pick(row, ["Units Ordered", "units ordered", "Units", "units"], 0)
       );
-
       const current = map.get(asin) || {
         asin,
         shortTitle: ref.shortTitle || asin,
@@ -1018,15 +1014,12 @@ export default function App() {
         sales30d: 0,
         units30d: 0,
       };
-
       current.sales30d += sales30d;
       current.units30d += units30d;
       map.set(asin, current);
     });
-
     return [...map.values()];
   }, [products30dSheet, referenceByAsin]);
-
 
   const monthlySales = useMemo(() => {
     const rows = salesMonthlySheet
@@ -1752,7 +1745,7 @@ export default function App() {
                   <div className="space-y-3">
                     {topProductsList.map((row, index) => (
                       <div
-                        key={`${row.adType}-${row.asin}`}
+                        key={row.asin}
                         className="flex items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-900/40 p-3"
                       >
                         <div className="flex min-w-0 items-center gap-3">
@@ -1798,8 +1791,6 @@ export default function App() {
                   </SectionCard>
                 </div>
               </div>
-            </div>
-          )}
 
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
                 <SectionCard title="Revenue by Brand" subtitle="Total sales in last 30 days">
@@ -1844,7 +1835,6 @@ export default function App() {
                   </div>
                 </SectionCard>
               </div>
-
             </div>
           )}
 
@@ -1936,77 +1926,81 @@ export default function App() {
                 <StatCard label="Wasted Spend 60D" value={wastedSpendSummary.totalWaste} icon={BadgeDollarSign} tone="rose" />
                 <StatCard label="Spend Already Protected" value={wastedSpendSummary.protectedSpend} icon={ShieldMinus} tone="emerald" />
               </div>
-<div className="space-y-6">
-  <SectionCard title="Top Waste Terms" subtitle="Highest-spend search terms still recommended for negative matching">
-    <div className="h-96 w-full">
-      <ResponsiveContainer>
-        <BarChart data={wasteChartData} layout="vertical" margin={{ left: 10, right: 10 }}>
-          <CartesianGrid stroke="#172033" horizontal={false} />
-          <XAxis type="number" stroke="#64748b" tickLine={false} axisLine={false} />
-          <YAxis
-            type="category"
-            dataKey="name"
-            width={120}
-            stroke="#64748b"
-            tickLine={false}
-            axisLine={false}
-            fontSize={12}
-          />
-          <Tooltip
-            contentStyle={{
-              background: "#020617",
-              border: "1px solid #1e293b",
-              borderRadius: 16,
-            }}
-            formatter={(v) => currency(v)}
-          />
-          <Bar dataKey="spend" radius={[0, 8, 8, 0]} fill="#f59e0b" />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  </SectionCard>
 
-  <SectionCard
-    title="Search Term Intelligence"
-    subtitle="Shows existing negatives plus search terms with 10+ clicks and no conversions"
-    right={<TogglePills value={searchView} onChange={setSearchView} options={["Recommended", "Existing Negatives", "All Terms"]} />}
-  >
-    <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-4">
-      <FilterSelect label="Ad Type" value={adType} onChange={setAdType} options={adTypeOptions} />
-      <FilterSelect label="Brand" value={brandFilter} onChange={setBrandFilter} options={brandOptions} />
-      <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
-      <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
-    </div>
+              <div className="space-y-6">
+                <SectionCard
+                  title="Top Waste Terms"
+                  subtitle="Highest-spend search terms still recommended for negative matching"
+                >
+                  <div className="h-96 w-full">
+                    <ResponsiveContainer>
+                      <BarChart data={wasteChartData} layout="vertical" margin={{ left: 10, right: 10 }}>
+                        <CartesianGrid stroke="#172033" horizontal={false} />
+                        <XAxis type="number" stroke="#64748b" tickLine={false} axisLine={false} />
+                        <YAxis
+                          type="category"
+                          dataKey="name"
+                          width={120}
+                          stroke="#64748b"
+                          tickLine={false}
+                          axisLine={false}
+                          fontSize={12}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            background: "#020617",
+                            border: "1px solid #1e293b",
+                            borderRadius: 16,
+                          }}
+                          formatter={(v) => currency(v)}
+                        />
+                        <Bar dataKey="spend" radius={[0, 8, 8, 0]} fill="#f59e0b" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </SectionCard>
 
-    {searchView === "Recommended" && (
-      <SortableTable
-        rowKey={(row, i) => `${row.adType}-${row.searchTerm}-${i}`}
-        columns={recommendedColumns}
-        rows={recommendedSort.sortedRows}
-        sortConfig={recommendedSort.sortConfig}
-        onSort={recommendedSort.handleSort}
-      />
-    )}
-    {searchView === "Existing Negatives" && (
-      <SortableTable
-        rowKey={(row, i) => `${row.adType}-${row.term}-${i}`}
-        columns={existingNegativeColumns}
-        rows={existingNegativeSort.sortedRows}
-        sortConfig={existingNegativeSort.sortConfig}
-        onSort={existingNegativeSort.handleSort}
-      />
-    )}
-    {searchView === "All Terms" && (
-      <SortableTable
-        rowKey={(row, i) => `${row.adType}-${row.searchTerm}-${i}`}
-        columns={allSearchTermColumns}
-        rows={allSearchTermSort.sortedRows}
-        sortConfig={allSearchTermSort.sortConfig}
-        onSort={allSearchTermSort.handleSort}
-      />
-    )}
-  </SectionCard>
-</div>
+                <SectionCard
+                  title="Search Term Intelligence"
+                  subtitle="Shows existing negatives plus search terms with 10+ clicks and no conversions"
+                  right={<TogglePills value={searchView} onChange={setSearchView} options={["Recommended", "Existing Negatives", "All Terms"]} />}
+                >
+                  <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-4">
+                    <FilterSelect label="Ad Type" value={adType} onChange={setAdType} options={adTypeOptions} />
+                    <FilterSelect label="Brand" value={brandFilter} onChange={setBrandFilter} options={brandOptions} />
+                    <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
+                    <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
+                  </div>
+
+                  {searchView === "Recommended" && (
+                    <SortableTable
+                      rowKey={(row, i) => `${row.adType}-${row.searchTerm}-${i}`}
+                      columns={recommendedColumns}
+                      rows={recommendedSort.sortedRows}
+                      sortConfig={recommendedSort.sortConfig}
+                      onSort={recommendedSort.handleSort}
+                    />
+                  )}
+                  {searchView === "Existing Negatives" && (
+                    <SortableTable
+                      rowKey={(row, i) => `${row.adType}-${row.term}-${i}`}
+                      columns={existingNegativeColumns}
+                      rows={existingNegativeSort.sortedRows}
+                      sortConfig={existingNegativeSort.sortConfig}
+                      onSort={existingNegativeSort.handleSort}
+                    />
+                  )}
+                  {searchView === "All Terms" && (
+                    <SortableTable
+                      rowKey={(row, i) => `${row.adType}-${row.searchTerm}-${i}`}
+                      columns={allSearchTermColumns}
+                      rows={allSearchTermSort.sortedRows}
+                      sortConfig={allSearchTermSort.sortConfig}
+                      onSort={allSearchTermSort.handleSort}
+                    />
+                  )}
+                </SectionCard>
+              </div>
             </div>
           )}
 
@@ -2071,7 +2065,34 @@ export default function App() {
                   />
                 </SectionCard>
 
-
+                <SectionCard title="Lowest Cover ASINs" subtitle="Quick visual for the 12 tightest stock positions">
+                  <div className="h-96 w-full">
+                    <ResponsiveContainer>
+                      <BarChart data={riskChartData} layout="vertical" margin={{ left: 10, right: 10 }}>
+                        <CartesianGrid stroke="#172033" horizontal={false} />
+                        <XAxis type="number" stroke="#64748b" tickLine={false} axisLine={false} />
+                        <YAxis
+                          type="category"
+                          dataKey="name"
+                          width={120}
+                          stroke="#64748b"
+                          tickLine={false}
+                          axisLine={false}
+                          fontSize={12}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            background: "#020617",
+                            border: "1px solid #1e293b",
+                            borderRadius: 16,
+                          }}
+                          formatter={(v) => daysLabel(v)}
+                        />
+                        <Bar dataKey="days" radius={[0, 8, 8, 0]} fill="#f59e0b" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </SectionCard>
               </div>
             </div>
           )}
