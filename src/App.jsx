@@ -49,6 +49,7 @@ const TAB_NAMES = {
   inventoryAwd: "inventory_awd",
   products30d: "products_30d",
   salesMonthly: "sales_monthly",
+  fbmOnly: "FBM_only",
 };
 
 const DAYS_TO_SHIP_TARGET = 60;
@@ -610,34 +611,22 @@ export default function App() {
   const [products30dSheet, setProducts30dSheet] = useState([]);
   const [salesMonthlySheet, setSalesMonthlySheet] = useState([]);
 
-  // ASINs flagged as FBM-only — excluded from replenishment/urgent suggestions.
-  // Persisted to localStorage so toggles survive page reloads.
-  const [fbmOnlyAsins, setFbmOnlyAsins] = useState(() => {
-    if (typeof window === "undefined") return new Set();
-    try {
-      const raw = window.localStorage.getItem("fbmOnlyAsins");
-      return raw ? new Set(JSON.parse(raw)) : new Set();
-    } catch {
-      return new Set();
-    }
-  });
+  // Source of truth for FBM-only ASINs: the "FBM_only" Google Sheet tab.
+  // Any ASIN listed there is excluded from replenishment/urgent suggestions.
+  const [fbmOnlySheet, setFbmOnlySheet] = useState([]);
 
-  const toggleFbmOnly = (asin) => {
-    if (!asin) return;
-    setFbmOnlyAsins((prev) => {
-      const next = new Set(prev);
-      if (next.has(asin)) next.delete(asin);
-      else next.add(asin);
-      try {
-        if (typeof window !== "undefined") {
-          window.localStorage.setItem("fbmOnlyAsins", JSON.stringify([...next]));
-        }
-      } catch {
-        /* ignore storage errors */
-      }
-      return next;
+  const fbmOnlyAsins = useMemo(() => {
+    const set = new Set();
+    fbmOnlySheet.forEach((row) => {
+      const asin = pick(row, ["ASIN", "asin", "Asin"], "");
+      const trimmed = String(asin || "").trim().toUpperCase();
+      if (trimmed) set.add(trimmed);
     });
-  };
+    return set;
+  }, [fbmOnlySheet]);
+
+  const isFbmOnly = (asin) =>
+    fbmOnlyAsins.has(String(asin || "").trim().toUpperCase());
 
   useEffect(() => {
     async function load() {
@@ -655,6 +644,7 @@ export default function App() {
           awd,
           products30d,
           salesMonthly,
+          fbmOnly,
         ] = await Promise.all([
           fetchSheet(TAB_NAMES.spCampaigns),
           fetchSheet(TAB_NAMES.spProducts),
@@ -667,6 +657,9 @@ export default function App() {
           fetchSheet(TAB_NAMES.inventoryAwd),
           fetchSheet(TAB_NAMES.products30d),
           fetchSheet(TAB_NAMES.salesMonthly),
+          // FBM_only is optional — fall back to empty if missing/unreachable so
+          // the rest of the dashboard still loads.
+          fetchSheet(TAB_NAMES.fbmOnly).catch(() => []),
         ]);
 
         setSpCampaignSheet(spCampaigns);
@@ -680,6 +673,7 @@ export default function App() {
         setInventoryAwdSheet(awd);
         setProducts30dSheet(products30d);
         setSalesMonthlySheet(salesMonthly);
+        setFbmOnlySheet(fbmOnly);
         setError("");
       } catch {
         setError(
@@ -1467,7 +1461,11 @@ const revenueByCategory = useMemo(() => {
   const urgentInventory = useMemo(
     () =>
       inventoryByAsin
-        .filter((row) => row.urgency === "urgent" && !fbmOnlyAsins.has(row.asin))
+        .filter(
+          (row) =>
+            row.urgency === "urgent" &&
+            !fbmOnlyAsins.has(String(row.asin || "").trim().toUpperCase())
+        )
         .sort((a, b) => a.daysOfCover - b.daysOfCover),
     [inventoryByAsin, fbmOnlyAsins]
   );
@@ -1475,7 +1473,11 @@ const revenueByCategory = useMemo(() => {
   const replenishInventory = useMemo(
     () =>
       inventoryByAsin
-        .filter((row) => row.urgency === "replenish" && !fbmOnlyAsins.has(row.asin))
+        .filter(
+          (row) =>
+            row.urgency === "replenish" &&
+            !fbmOnlyAsins.has(String(row.asin || "").trim().toUpperCase())
+        )
         .sort((a, b) => a.daysOfCover - b.daysOfCover),
     [inventoryByAsin, fbmOnlyAsins]
   );
@@ -1759,21 +1761,18 @@ const revenueByCategory = useMemo(() => {
       key: "fbmOnly",
       label: "FBM Only",
       type: "number",
-      sortAccessor: (r) => (fbmOnlyAsins.has(r.asin) ? 1 : 0),
-      render: (r) => (
-        <label
-          className="inline-flex cursor-pointer items-center justify-center"
-          title="Mark this ASIN as FBM-only to exclude it from replenishment suggestions"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <input
-            type="checkbox"
-            checked={fbmOnlyAsins.has(r.asin)}
-            onChange={() => toggleFbmOnly(r.asin)}
-            className="h-4 w-4 cursor-pointer accent-cyan-500"
-          />
-        </label>
-      ),
+      sortAccessor: (r) => (isFbmOnly(r.asin) ? 1 : 0),
+      render: (r) =>
+        isFbmOnly(r.asin) ? (
+          <span
+            className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-300"
+            title="Listed in the FBM_only sheet — excluded from replenishment suggestions"
+          >
+            FBM
+          </span>
+        ) : (
+          <span className="text-slate-600">—</span>
+        ),
     },
   ];
 
@@ -2613,4 +2612,122 @@ const revenueByCategory = useMemo(() => {
                   right={
                     <ExportButton
                       filename="replenishment-watch.csv"
-                      rows={replenishSort.sortedR
+                      rows={replenishSort.sortedRows.slice(0, 25)}
+                      columns={inventoryExportColumns}
+                    />
+                  }
+                >
+                  {replenishInventory.length === 0 ? (
+                    <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">
+                      Nothing currently falls into the watch window.
+                    </div>
+                  ) : (
+                    <SortableTable
+                      rowKey="asin"
+                      columns={inventoryColumns}
+                      rows={replenishSort.sortedRows.slice(0, 25)}
+                      sortConfig={replenishSort.sortConfig}
+                      onSort={replenishSort.handleSort}
+                    />
+                  )}
+                </SectionCard>
+
+                <SectionCard
+                  title="Inventory Risk by ASIN"
+                  subtitle="All tracked ASINs, sortable by cover, stock, and sales"
+                  right={
+                    <ExportButton
+                      filename="inventory-risk.csv"
+                      rows={inventorySort.sortedRows}
+                      columns={inventoryExportColumns}
+                    />
+                  }
+                >
+                  <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-4">
+                    <FilterSelect label="Inventory View" value={inventoryFilter} onChange={setInventoryFilter} options={["All", "urgent", "replenish", "healthy", "no_sales"]} />
+                    <FilterSelect label="Brand" value={brandFilter} onChange={setBrandFilter} options={brandOptions} />
+                    <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
+                    <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
+                  </div>
+                  <SortableTable
+                    rowKey="asin"
+                    columns={inventoryColumns}
+                    rows={inventorySort.sortedRows}
+                    sortConfig={inventorySort.sortConfig}
+                    onSort={inventorySort.handleSort}
+                  />
+                </SectionCard>
+
+                <SectionCard
+                  title="Lowest Cover ASINs"
+                  subtitle="Quick visual for the 12 tightest stock positions"
+                  right={
+                    <ExportButton
+                      filename="lowest-cover-asins.csv"
+                      rows={riskChartData}
+                      columns={riskChartExportColumns}
+                    />
+                  }
+                >
+                  <div className="h-96 w-full">
+                    <ResponsiveContainer>
+                      <BarChart data={riskChartData} layout="vertical" margin={{ left: 10, right: 10 }}>
+                        <CartesianGrid stroke="#172033" horizontal={false} />
+                        <XAxis type="number" stroke="#64748b" tickLine={false} axisLine={false} />
+                        <YAxis
+                          type="category"
+                          dataKey="name"
+                          width={120}
+                          stroke="#64748b"
+                          tickLine={false}
+                          axisLine={false}
+                          fontSize={12}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            background: "#020617",
+                            border: "1px solid #1e293b",
+                            borderRadius: 16,
+                          }}
+                          formatter={(v) => daysLabel(v)}
+                        />
+                        <Bar dataKey="days" radius={[0, 8, 8, 0]} fill="#f59e0b" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </SectionCard>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "catalog" && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <CountCard label="Reference Rows" value={referenceSheet.length} icon={Package} tone="cyan" />
+                <CountCard label="Products in Ad Report" value={productGrouped.length} icon={Boxes} tone="cyan" />
+                <CountCard label="Mapped Parents" value={parentGrouped.length} icon={Package} tone="emerald" />
+                <CountCard label="Item Types" value={itemTypeGrouped.length} icon={Package} tone="amber" />
+              </div>
+
+              <SectionCard title="Catalog Preview" subtitle="Sortable and filter-aware">
+                <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <FilterSelect label="Ad Type" value={adType} onChange={setAdType} options={adTypeOptions} />
+                  <FilterSelect label="Brand" value={brandFilter} onChange={setBrandFilter} options={brandOptions} />
+                  <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
+                  <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
+                </div>
+                <SortableTable
+                  rowKey={(row) => `${row.adType}-${row.asin}`}
+                  columns={catalogColumns}
+                  rows={catalogSort.sortedRows}
+                  sortConfig={catalogSort.sortConfig}
+                  onSort={catalogSort.handleSort}
+                />
+              </SectionCard>
+            </div>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
