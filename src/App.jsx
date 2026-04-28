@@ -20,6 +20,7 @@ import {
   TrendingUp,
   TrendingDown,
   LineChart as LineChartIcon,
+  Download,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -96,6 +97,64 @@ function normalizeNumber(value) {
   if (value === null || value === undefined || value === "") return 0;
   if (typeof value === "number") return value;
   return Number(String(value).replace(/[$,%\s,]/g, "")) || 0;
+}
+
+function csvEscape(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return "";
+    return String(value);
+  }
+  const str = String(value);
+  if (/[",\n\r]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+  return str;
+}
+
+function exportRowsToCsv(filename, rows, columns) {
+  if (typeof window === "undefined") return;
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const headers = columns.map((c) => csvEscape(c.label)).join(",");
+  const body = safeRows
+    .map((row) =>
+      columns
+        .map((col) => {
+          const raw = col.accessor ? col.accessor(row) : row[col.key];
+          return csvEscape(raw);
+        })
+        .join(",")
+    )
+    .join("\n");
+  const csv = `${headers}\n${body}`;
+  // Prepend BOM so Excel renders UTF-8 correctly.
+  const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function ExportButton({ filename, rows, columns, label = "Export" }) {
+  const disabled = !rows || rows.length === 0;
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => exportRowsToCsv(filename, rows, columns)}
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition",
+        disabled
+          ? "cursor-not-allowed border-slate-800 bg-slate-900 text-slate-500"
+          : "border-slate-700 bg-slate-900 text-slate-200 hover:border-cyan-400 hover:text-cyan-300"
+      )}
+    >
+      <Download className="h-3.5 w-3.5" />
+      {label}
+    </button>
+  );
 }
 
 function normalizeText(value) {
@@ -550,6 +609,35 @@ export default function App() {
   const [inventoryAwdSheet, setInventoryAwdSheet] = useState([]);
   const [products30dSheet, setProducts30dSheet] = useState([]);
   const [salesMonthlySheet, setSalesMonthlySheet] = useState([]);
+
+  // ASINs flagged as FBM-only — excluded from replenishment/urgent suggestions.
+  // Persisted to localStorage so toggles survive page reloads.
+  const [fbmOnlyAsins, setFbmOnlyAsins] = useState(() => {
+    if (typeof window === "undefined") return new Set();
+    try {
+      const raw = window.localStorage.getItem("fbmOnlyAsins");
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+
+  const toggleFbmOnly = (asin) => {
+    if (!asin) return;
+    setFbmOnlyAsins((prev) => {
+      const next = new Set(prev);
+      if (next.has(asin)) next.delete(asin);
+      else next.add(asin);
+      try {
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem("fbmOnlyAsins", JSON.stringify([...next]));
+        }
+      } catch {
+        /* ignore storage errors */
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     async function load() {
@@ -1379,17 +1467,17 @@ const revenueByCategory = useMemo(() => {
   const urgentInventory = useMemo(
     () =>
       inventoryByAsin
-        .filter((row) => row.urgency === "urgent")
+        .filter((row) => row.urgency === "urgent" && !fbmOnlyAsins.has(row.asin))
         .sort((a, b) => a.daysOfCover - b.daysOfCover),
-    [inventoryByAsin]
+    [inventoryByAsin, fbmOnlyAsins]
   );
 
   const replenishInventory = useMemo(
     () =>
       inventoryByAsin
-        .filter((row) => row.urgency === "replenish")
+        .filter((row) => row.urgency === "replenish" && !fbmOnlyAsins.has(row.asin))
         .sort((a, b) => a.daysOfCover - b.daysOfCover),
-    [inventoryByAsin]
+    [inventoryByAsin, fbmOnlyAsins]
   );
 
   const inventorySummary = useMemo(() => {
@@ -1667,6 +1755,26 @@ const revenueByCategory = useMemo(() => {
     { key: "sales", label: "Ad Sales", type: "number", render: (r) => currency(r.sales) },
     { key: "acos", label: "ACOS", type: "number", render: (r) => pct(r.acos) },
     { key: "roas", label: "ROAS", type: "number", render: (r) => `${r.roas.toFixed(2)}x` },
+    {
+      key: "fbmOnly",
+      label: "FBM Only",
+      type: "number",
+      sortAccessor: (r) => (fbmOnlyAsins.has(r.asin) ? 1 : 0),
+      render: (r) => (
+        <label
+          className="inline-flex cursor-pointer items-center justify-center"
+          title="Mark this ASIN as FBM-only to exclude it from replenishment suggestions"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            type="checkbox"
+            checked={fbmOnlyAsins.has(r.asin)}
+            onChange={() => toggleFbmOnly(r.asin)}
+            className="h-4 w-4 cursor-pointer accent-cyan-500"
+          />
+        </label>
+      ),
+    },
   ];
 
   const targetingColumns = [
@@ -1774,6 +1882,40 @@ const revenueByCategory = useMemo(() => {
     { key: "unitsPerDay", label: "Units/Day", type: "number", render: (r) => (r.unitsPerDay ? r.unitsPerDay.toFixed(2) : "—") },
     { key: "daysOfCover", label: "Cover", type: "number", render: (r) => daysLabel(r.daysOfCover) },
     { key: "urgency", label: "Status", type: "text", render: (r) => urgencyPill(r.daysOfCover) },
+  ];
+
+  // Plain-data column maps used for CSV/Excel exports — no JSX renderers.
+  const inventoryExportColumns = [
+    { key: "asin", label: "ASIN" },
+    { key: "shortTitle", label: "Title" },
+    { key: "brand", label: "Brand" },
+    { key: "parentAsin", label: "Parent ASIN" },
+    { key: "itemType", label: "Item Type" },
+    { key: "fbaUnits", label: "FBA Units" },
+    { key: "awdUnits", label: "AWD Units" },
+    { key: "totalUnits", label: "Total Units" },
+    { key: "units30d", label: "Units (30d)" },
+    {
+      key: "unitsPerDay",
+      label: "Units/Day",
+      accessor: (r) => (Number.isFinite(r.unitsPerDay) ? Number(r.unitsPerDay.toFixed(2)) : ""),
+    },
+    {
+      key: "daysOfCover",
+      label: "Days of Cover",
+      accessor: (r) =>
+        Number.isFinite(r.daysOfCover) ? Number(r.daysOfCover.toFixed(1)) : "No sales",
+    },
+    { key: "urgency", label: "Status" },
+  ];
+
+  const riskChartExportColumns = [
+    { key: "name", label: "Product" },
+    {
+      key: "days",
+      label: "Days of Cover",
+      accessor: (r) => (Number.isFinite(r.days) ? Number(r.days.toFixed(1)) : ""),
+    },
   ];
 
   const recommendedColumns = [
@@ -2438,8 +2580,18 @@ const revenueByCategory = useMemo(() => {
                 <CountCard label="AWD Units" value={inventorySummary.totalAwd} icon={Truck} tone="emerald" />
               </div>
 
-              <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                <SectionCard title="Urgent Block" subtitle="ASINs below 2 weeks of cover need immediate attention">
+              <div className="space-y-6">
+                <SectionCard
+                  title="Urgent Block"
+                  subtitle="ASINs below 2 weeks of cover need immediate attention"
+                  right={
+                    <ExportButton
+                      filename="urgent-inventory.csv"
+                      rows={urgentSort.sortedRows.slice(0, 25)}
+                      columns={inventoryExportColumns}
+                    />
+                  }
+                >
                   {urgentInventory.length === 0 ? (
                     <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">
                       No ASINs are below 2 weeks of cover.
@@ -2455,100 +2607,10 @@ const revenueByCategory = useMemo(() => {
                   )}
                 </SectionCard>
 
-                <SectionCard title="Replenishment Watch" subtitle="ASINs below 2 months of cover but above urgent threshold">
-                  {replenishInventory.length === 0 ? (
-                    <div className="rounded-2xl border border-emerald-900 bg-emerald-500/10 p-5 text-sm text-emerald-300">
-                      Nothing currently falls into the watch window.
-                    </div>
-                  ) : (
-                    <SortableTable
-                      rowKey="asin"
-                      columns={inventoryColumns}
-                      rows={replenishSort.sortedRows.slice(0, 25)}
-                      sortConfig={replenishSort.sortConfig}
-                      onSort={replenishSort.handleSort}
-                    />
-                  )}
-                </SectionCard>
-              </div>
-
-              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.25fr_1fr]">
-                <SectionCard title="Inventory Risk by ASIN" subtitle="All tracked ASINs, sortable by cover, stock, and sales">
-                  <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-4">
-                    <FilterSelect label="Inventory View" value={inventoryFilter} onChange={setInventoryFilter} options={["All", "urgent", "replenish", "healthy", "no_sales"]} />
-                    <FilterSelect label="Brand" value={brandFilter} onChange={setBrandFilter} options={brandOptions} />
-                    <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
-                    <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
-                  </div>
-                  <SortableTable
-                    rowKey="asin"
-                    columns={inventoryColumns}
-                    rows={inventorySort.sortedRows}
-                    sortConfig={inventorySort.sortConfig}
-                    onSort={inventorySort.handleSort}
-                  />
-                </SectionCard>
-
-                <SectionCard title="Lowest Cover ASINs" subtitle="Quick visual for the 12 tightest stock positions">
-                  <div className="h-96 w-full">
-                    <ResponsiveContainer>
-                      <BarChart data={riskChartData} layout="vertical" margin={{ left: 10, right: 10 }}>
-                        <CartesianGrid stroke="#172033" horizontal={false} />
-                        <XAxis type="number" stroke="#64748b" tickLine={false} axisLine={false} />
-                        <YAxis
-                          type="category"
-                          dataKey="name"
-                          width={120}
-                          stroke="#64748b"
-                          tickLine={false}
-                          axisLine={false}
-                          fontSize={12}
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            background: "#020617",
-                            border: "1px solid #1e293b",
-                            borderRadius: 16,
-                          }}
-                          formatter={(v) => daysLabel(v)}
-                        />
-                        <Bar dataKey="days" radius={[0, 8, 8, 0]} fill="#f59e0b" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </SectionCard>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "catalog" && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <CountCard label="Reference Rows" value={referenceSheet.length} icon={Package} tone="cyan" />
-                <CountCard label="Products in Ad Report" value={productGrouped.length} icon={Boxes} tone="cyan" />
-                <CountCard label="Mapped Parents" value={parentGrouped.length} icon={Package} tone="emerald" />
-                <CountCard label="Item Types" value={itemTypeGrouped.length} icon={Package} tone="amber" />
-              </div>
-
-              <SectionCard title="Catalog Preview" subtitle="Sortable and filter-aware">
-                <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <FilterSelect label="Ad Type" value={adType} onChange={setAdType} options={adTypeOptions} />
-                  <FilterSelect label="Brand" value={brandFilter} onChange={setBrandFilter} options={brandOptions} />
-                  <FilterSelect label="Item Type" value={itemTypeFilter} onChange={setItemTypeFilter} options={itemTypeOptions} />
-                  <FilterSelect label="Parent ASIN" value={parentFilter} onChange={setParentFilter} options={parentOptions} />
-                </div>
-                <SortableTable
-                  rowKey={(row) => `${row.adType}-${row.asin}`}
-                  columns={catalogColumns}
-                  rows={catalogSort.sortedRows}
-                  sortConfig={catalogSort.sortConfig}
-                  onSort={catalogSort.handleSort}
-                />
-              </SectionCard>
-            </div>
-          )}
-        </main>
-      </div>
-    </div>
-  );
-}
+                <SectionCard
+                  title="Replenishment Watch"
+                  subtitle="ASINs below 2 months of cover but above urgent threshold"
+                  right={
+                    <ExportButton
+                      filename="replenishment-watch.csv"
+                      rows={replenishSort.sortedR
