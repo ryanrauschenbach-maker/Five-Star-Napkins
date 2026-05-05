@@ -50,11 +50,25 @@ const TAB_NAMES = {
   products30d: "products_30d",
   salesMonthly: "sales_monthly",
   fbmOnly: "FBM_only",
+  // Campaign performance reports — same schema as the 30-day defaults above,
+  // exported from bulk operations for additional lookback windows.
+  spCampaigns7: "Sponsored Products Campaigns_7",
+  sbCampaigns7: "Sponsored Brands Campaigns_7",
+  sdCampaigns7: "Sponsored Display Campaigns_7",
+  spCampaigns60: "Sponsored Products Campaigns_60",
+  sbCampaigns60: "Sponsored Brands Campaigns_60",
+  sdCampaigns60: "Sponsored Display Campaigns_60",
 };
 
 const DAYS_TO_SHIP_TARGET = 60;
 const DAYS_URGENT = 14;
 const NEGATIVE_CLICK_THRESHOLD = 12;
+
+// Campaign Trends thresholds (used by the Recommended Actions categorizer)
+const CAMPAIGN_TARGET_ROAS = 3.0;       // Healthy ROAS floor
+const CAMPAIGN_HIDDEN_GEM_ROAS = 4.0;   // ROAS bar to call something a hidden gem
+const CAMPAIGN_BLEEDING_SPEND = 50;     // Minimum 30d spend to flag as bleeding when zero orders
+const CAMPAIGN_MIN_TREND_SPEND = 5;     // Minimum spend per window before we trust a trend signal
 
 function cn(...classes) {
   return classes.filter(Boolean).join(" ");
@@ -586,6 +600,123 @@ function monthLabel(dateValue) {
   return d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
 }
 
+// Parse a bulk-operations campaign sheet (any window) into a normalized list of
+// campaign rows. Mirrors the logic that was previously inlined per ad-type so we
+// can reuse it across the 7/30/60 day windows.
+function parseCampaignBulkSheet(sheet, adType) {
+  if (!Array.isArray(sheet)) return [];
+  return sheet
+    .filter((row) => normalizeText(pick(row, ["Entity", "entity"])).toLowerCase() === "campaign")
+    .map((row) => {
+      const spend = normalizeNumber(pick(row, ["Spend", "Spend(USD)", "Cost"]));
+      const sales = normalizeNumber(
+        pick(row, [
+          "Sales",
+          "Sales(USD)",
+          "Attributed Sales",
+          "Sales 7 Day Total Sales",
+          "14 Day Total Sales",
+          "Sales 14 Day Total Sales",
+        ])
+      );
+      const clicks = normalizeNumber(pick(row, ["Clicks"]));
+      const impressions = normalizeNumber(pick(row, ["Impressions"]));
+      const orders = normalizeNumber(pick(row, ["Orders", "Orders (#)"]));
+      return {
+        adType,
+        campaignName: normalizeText(pick(row, ["Campaign Name", "Campaign"])),
+        state: normalizeText(pick(row, ["State", "Status"], "—")),
+        impressions,
+        clicks,
+        spend,
+        sales,
+        orders,
+        ctr: impressions ? (clicks / impressions) * 100 : 0,
+        acos: sales ? (spend / sales) * 100 : 0,
+        roas: spend ? sales / spend : 0,
+      };
+    });
+}
+
+// Decide a recommended-action category for a campaign based on its trend across
+// the 7/30/60 day windows. Returns one of:
+//   'improving'  — ROAS rising across windows, latest above target
+//   'declining'  — ROAS falling across windows, latest below target
+//   'bleeding'   — meaningful 30d spend with zero orders
+//   'hidden_gem' — high ROAS across windows but small spend (room to scale)
+//   'monitor'    — fallback / no clear signal
+function categorizeCampaign(trend) {
+  const w7 = trend.windows["7"];
+  const w30 = trend.windows["30"];
+  const w60 = trend.windows["60"];
+
+  // Need at least the 30-day window with some activity to do anything useful.
+  if (!w30 || (w30.spend === 0 && w30.impressions === 0)) return "monitor";
+
+  // Bleeding: real spend in 30d but no orders attributed.
+  if (w30.spend >= CAMPAIGN_BLEEDING_SPEND && w30.orders === 0) {
+    return "bleeding";
+  }
+
+  // Trend signals require all three windows with non-trivial spend so we don't
+  // chase noise from a campaign that just launched or barely ran.
+  const haveAll =
+    w7 && w60 &&
+    w7.spend >= CAMPAIGN_MIN_TREND_SPEND &&
+    w30.spend >= CAMPAIGN_MIN_TREND_SPEND &&
+    w60.spend >= CAMPAIGN_MIN_TREND_SPEND;
+
+  if (haveAll) {
+    if (w7.roas > w30.roas && w30.roas > w60.roas && w7.roas >= CAMPAIGN_TARGET_ROAS) {
+      return "improving";
+    }
+    if (w7.roas < w30.roas && w30.roas < w60.roas && w7.roas < CAMPAIGN_TARGET_ROAS) {
+      return "declining";
+    }
+  }
+
+  // Hidden gem: consistently high ROAS but small spend footprint — likely capped.
+  if (w30.roas >= CAMPAIGN_HIDDEN_GEM_ROAS && w30.spend < 200) {
+    const supporting =
+      (w60 && w60.spend >= CAMPAIGN_MIN_TREND_SPEND && w60.roas >= CAMPAIGN_TARGET_ROAS) ||
+      (w7 && w7.spend >= CAMPAIGN_MIN_TREND_SPEND && w7.roas >= CAMPAIGN_TARGET_ROAS);
+    if (supporting) return "hidden_gem";
+  }
+
+  return "monitor";
+}
+
+const CAMPAIGN_CATEGORIES = [
+  { id: "all", label: "All Campaigns", tone: "slate", action: "" },
+  { id: "improving", label: "Improving", tone: "emerald", action: "Raise bids 10–20%" },
+  { id: "declining", label: "Declining", tone: "rose", action: "Lower bids 10–20%" },
+  { id: "bleeding", label: "Bleeding", tone: "amber", action: "Pause or add negatives" },
+  { id: "hidden_gem", label: "Hidden Gem", tone: "cyan", action: "Raise daily budget" },
+  { id: "monitor", label: "Monitor", tone: "slate", action: "No action — keep watching" },
+];
+
+const CATEGORY_TONE_CLASSES = {
+  slate: "border-slate-700 bg-slate-900 text-slate-300",
+  emerald: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+  rose: "border-rose-500/40 bg-rose-500/10 text-rose-300",
+  amber: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+  cyan: "border-cyan-500/40 bg-cyan-500/10 text-cyan-300",
+};
+
+function CategoryPill({ categoryId }) {
+  const cat = CAMPAIGN_CATEGORIES.find((c) => c.id === categoryId) || CAMPAIGN_CATEGORIES[5];
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium",
+        CATEGORY_TONE_CLASSES[cat.tone] || CATEGORY_TONE_CLASSES.slate
+      )}
+    >
+      {cat.label}
+    </span>
+  );
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState("overview");
   const [adView, setAdView] = useState("Campaign");
@@ -614,6 +745,19 @@ export default function App() {
   // Source of truth for FBM-only ASINs: the "FBM_only" Google Sheet tab.
   // Any ASIN listed there is excluded from replenishment/urgent suggestions.
   const [fbmOnlySheet, setFbmOnlySheet] = useState([]);
+
+  // Campaign reports for additional lookback windows (7-day and 60-day).
+  // The 30-day data already lives in the existing spCampaignSheet/sb/sd state.
+  const [spCampaignSheet7, setSpCampaignSheet7] = useState([]);
+  const [sbCampaignSheet7, setSbCampaignSheet7] = useState([]);
+  const [sdCampaignSheet7, setSdCampaignSheet7] = useState([]);
+  const [spCampaignSheet60, setSpCampaignSheet60] = useState([]);
+  const [sbCampaignSheet60, setSbCampaignSheet60] = useState([]);
+  const [sdCampaignSheet60, setSdCampaignSheet60] = useState([]);
+
+  // Campaign Trends page UI state
+  const [campaignWindow, setCampaignWindow] = useState("30"); // "7" | "30" | "60"
+  const [campaignActionFilter, setCampaignActionFilter] = useState("all");
 
   const fbmOnlyAsins = useMemo(() => {
     const set = new Set();
@@ -645,6 +789,12 @@ export default function App() {
           products30d,
           salesMonthly,
           fbmOnly,
+          spCamp7,
+          sbCamp7,
+          sdCamp7,
+          spCamp60,
+          sbCamp60,
+          sdCamp60,
         ] = await Promise.all([
           fetchSheet(TAB_NAMES.spCampaigns),
           fetchSheet(TAB_NAMES.spProducts),
@@ -660,6 +810,15 @@ export default function App() {
           // FBM_only is optional — fall back to empty if missing/unreachable so
           // the rest of the dashboard still loads.
           fetchSheet(TAB_NAMES.fbmOnly).catch(() => []),
+          // 7-day and 60-day campaign reports are optional. If a tab is missing
+          // the Campaign Trends page just shows empty windows — the rest of the
+          // dashboard keeps working off the 30-day defaults.
+          fetchSheet(TAB_NAMES.spCampaigns7).catch(() => []),
+          fetchSheet(TAB_NAMES.sbCampaigns7).catch(() => []),
+          fetchSheet(TAB_NAMES.sdCampaigns7).catch(() => []),
+          fetchSheet(TAB_NAMES.spCampaigns60).catch(() => []),
+          fetchSheet(TAB_NAMES.sbCampaigns60).catch(() => []),
+          fetchSheet(TAB_NAMES.sdCampaigns60).catch(() => []),
         ]);
 
         setSpCampaignSheet(spCampaigns);
@@ -674,6 +833,12 @@ export default function App() {
         setProducts30dSheet(products30d);
         setSalesMonthlySheet(salesMonthly);
         setFbmOnlySheet(fbmOnly);
+        setSpCampaignSheet7(spCamp7);
+        setSbCampaignSheet7(sbCamp7);
+        setSdCampaignSheet7(sdCamp7);
+        setSpCampaignSheet60(spCamp60);
+        setSbCampaignSheet60(sbCamp60);
+        setSdCampaignSheet60(sdCamp60);
         setError("");
       } catch {
         setError(
@@ -794,6 +959,116 @@ export default function App() {
             .includes(query.toLowerCase())
       );
   }, [spCampaignSheet, sbCampaignSheet, sdCampaignSheet, adType, query]);
+
+  // ---------- Campaign Trends data plumbing ----------
+  // Parse each window into a flat list of campaign rows (no UI filters applied).
+  const campaignsByWindow = useMemo(() => {
+    return {
+      "7": [
+        ...parseCampaignBulkSheet(spCampaignSheet7, "Sponsored Products"),
+        ...parseCampaignBulkSheet(sbCampaignSheet7, "Sponsored Brands"),
+        ...parseCampaignBulkSheet(sdCampaignSheet7, "Sponsored Display"),
+      ],
+      "30": [
+        ...parseCampaignBulkSheet(spCampaignSheet, "Sponsored Products"),
+        ...parseCampaignBulkSheet(sbCampaignSheet, "Sponsored Brands"),
+        ...parseCampaignBulkSheet(sdCampaignSheet, "Sponsored Display"),
+      ],
+      "60": [
+        ...parseCampaignBulkSheet(spCampaignSheet60, "Sponsored Products"),
+        ...parseCampaignBulkSheet(sbCampaignSheet60, "Sponsored Brands"),
+        ...parseCampaignBulkSheet(sdCampaignSheet60, "Sponsored Display"),
+      ],
+    };
+  }, [
+    spCampaignSheet, sbCampaignSheet, sdCampaignSheet,
+    spCampaignSheet7, sbCampaignSheet7, sdCampaignSheet7,
+    spCampaignSheet60, sbCampaignSheet60, sdCampaignSheet60,
+  ]);
+
+  // Stitch each campaign's rows across windows into a single trend object.
+  const campaignTrends = useMemo(() => {
+    const map = new Map();
+    for (const w of ["7", "30", "60"]) {
+      for (const r of campaignsByWindow[w]) {
+        if (!r.campaignName) continue;
+        const key = `${r.adType}||${r.campaignName}`;
+        const existing = map.get(key) || {
+          adType: r.adType,
+          campaignName: r.campaignName,
+          state: r.state,
+          windows: {},
+        };
+        existing.windows[w] = r;
+        // Prefer the most recent (smallest window) state if present.
+        if (w === "7" && r.state) existing.state = r.state;
+        else if (!existing.state && r.state) existing.state = r.state;
+        map.set(key, existing);
+      }
+    }
+    return [...map.values()].map((trend) => ({
+      ...trend,
+      category: categorizeCampaign(trend),
+    }));
+  }, [campaignsByWindow]);
+
+  // Counts per recommended-action category, used by the cards at the top.
+  const campaignCategoryCounts = useMemo(() => {
+    const counts = { all: campaignTrends.length };
+    for (const c of CAMPAIGN_CATEGORIES) {
+      if (c.id === "all") continue;
+      counts[c.id] = 0;
+    }
+    for (const t of campaignTrends) {
+      counts[t.category] = (counts[t.category] || 0) + 1;
+    }
+    return counts;
+  }, [campaignTrends]);
+
+  // The flat list driving the Campaign Trends table — applies the window/filters
+  // so we surface metrics for the chosen window at the top level of each row.
+  const campaignTrendRows = useMemo(() => {
+    const w = campaignWindow;
+    return campaignTrends
+      .filter(
+        (t) =>
+          campaignActionFilter === "all" || t.category === campaignActionFilter
+      )
+      .filter((t) => adType === "All" || t.adType === adType)
+      .filter(
+        (t) =>
+          itemTypeFilter === "All" ||
+          (t.campaignName || "")
+            .toLowerCase()
+            .includes(itemTypeFilter.toLowerCase())
+      )
+      .filter(
+        (t) =>
+          !query ||
+          `${t.campaignName} ${t.state} ${t.adType}`
+            .toLowerCase()
+            .includes(query.toLowerCase())
+      )
+      .map((t) => {
+        const cur = t.windows[w] || {};
+        return {
+          ...t,
+          spend: cur.spend ?? 0,
+          sales: cur.sales ?? 0,
+          clicks: cur.clicks ?? 0,
+          impressions: cur.impressions ?? 0,
+          orders: cur.orders ?? 0,
+          ctr: cur.ctr ?? 0,
+          acos: cur.acos ?? 0,
+          roas: cur.roas ?? 0,
+          roas7: t.windows["7"]?.roas ?? null,
+          roas30: t.windows["30"]?.roas ?? null,
+          roas60: t.windows["60"]?.roas ?? null,
+          recommendedAction:
+            (CAMPAIGN_CATEGORIES.find((c) => c.id === t.category) || {}).action || "",
+        };
+      });
+  }, [campaignTrends, campaignWindow, campaignActionFilter, adType, itemTypeFilter, query]);
 
   const spProductRows = useMemo(() => {
     return spProductSheet
@@ -1504,6 +1779,23 @@ const revenueByCategory = useMemo(() => {
       }));
   }, [inventoryByAsin]);
 
+  // Export-only version of the lowest-cover data: excludes FBM-only ASINs and
+  // uses the full untruncated title (CSV doesn't need ellipses).
+  const riskChartExportRows = useMemo(() => {
+    return [...inventoryByAsin]
+      .filter(
+        (row) =>
+          Number.isFinite(row.daysOfCover) &&
+          !fbmOnlyAsins.has(String(row.asin || "").trim().toUpperCase())
+      )
+      .sort((a, b) => a.daysOfCover - b.daysOfCover)
+      .slice(0, 12)
+      .map((row) => ({
+        name: row.shortTitle,
+        days: row.daysOfCover,
+      }));
+  }, [inventoryByAsin, fbmOnlyAsins]);
+
   const spExistingNegatives = useMemo(() => {
     return spCampaignSheet
       .filter((row) => {
@@ -1963,6 +2255,88 @@ const revenueByCategory = useMemo(() => {
   ];
 
   const campaignSort = useSortableRows(unifiedCampaignRows, { key: "spend", type: "number", direction: "desc" });
+  const trendsSort = useSortableRows(campaignTrendRows, { key: "spend", type: "number", direction: "desc" });
+
+  // Columns for the Campaign Trends table — current-window metrics + the 7/30/60
+  // ROAS triplet so the trend is visible at a glance, plus the recommended action.
+  const trendArrow = (a, b) => {
+    if (a == null || b == null) return "";
+    if (a > b) return "▲";
+    if (a < b) return "▼";
+    return "·";
+  };
+  const fmtRoas = (v) => (v == null ? "—" : `${Number(v).toFixed(2)}x`);
+  const trendsColumns = [
+    {
+      key: "campaignName",
+      label: "Campaign",
+      type: "text",
+      render: (r) => (
+        <div className="min-w-0">
+          <div className="truncate font-medium text-cyan-300">{r.campaignName || "—"}</div>
+          <div className="text-xs text-slate-400">
+            {r.adType} · {r.state}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "category",
+      label: "Recommendation",
+      type: "text",
+      sortAccessor: (r) => r.category,
+      render: (r) => (
+        <div className="flex flex-col gap-1">
+          <CategoryPill categoryId={r.category} />
+          {r.recommendedAction ? (
+            <span className="text-[11px] text-slate-400">{r.recommendedAction}</span>
+          ) : null}
+        </div>
+      ),
+    },
+    { key: "spend", label: "Spend", type: "number", render: (r) => currency(r.spend) },
+    { key: "sales", label: "Sales", type: "number", render: (r) => currency(r.sales) },
+    { key: "orders", label: "Orders", type: "number", render: (r) => numberFmt(r.orders) },
+    { key: "clicks", label: "Clicks", type: "number", render: (r) => numberFmt(r.clicks) },
+    { key: "ctr", label: "CTR", type: "number", render: (r) => pct(r.ctr) },
+    { key: "acos", label: "ACOS", type: "number", render: (r) => pct(r.acos) },
+    { key: "roas", label: "ROAS", type: "number", render: (r) => fmtRoas(r.roas) },
+    {
+      key: "trend",
+      label: "Trend (7 / 30 / 60)",
+      type: "number",
+      sortAccessor: (r) => r.roas7 ?? -1,
+      render: (r) => (
+        <div className="flex items-center gap-2 text-xs">
+          <span>{fmtRoas(r.roas7)}</span>
+          <span className="text-slate-500">{trendArrow(r.roas7, r.roas30)}</span>
+          <span>{fmtRoas(r.roas30)}</span>
+          <span className="text-slate-500">{trendArrow(r.roas30, r.roas60)}</span>
+          <span>{fmtRoas(r.roas60)}</span>
+        </div>
+      ),
+    },
+  ];
+
+  // Plain export columns (no JSX renderers) for the CSV.
+  const trendsExportColumns = [
+    { key: "campaignName", label: "Campaign" },
+    { key: "adType", label: "Ad Type" },
+    { key: "state", label: "State" },
+    { key: "category", label: "Category" },
+    { key: "recommendedAction", label: "Recommended Action" },
+    { key: "spend", label: "Spend" },
+    { key: "sales", label: "Sales" },
+    { key: "orders", label: "Orders" },
+    { key: "clicks", label: "Clicks" },
+    { key: "impressions", label: "Impressions" },
+    { key: "ctr", label: "CTR %", accessor: (r) => Number((r.ctr || 0).toFixed(2)) },
+    { key: "acos", label: "ACOS %", accessor: (r) => Number((r.acos || 0).toFixed(2)) },
+    { key: "roas", label: "ROAS", accessor: (r) => Number((r.roas || 0).toFixed(2)) },
+    { key: "roas7", label: "ROAS 7d", accessor: (r) => (r.roas7 == null ? "" : Number(r.roas7.toFixed(2))) },
+    { key: "roas30", label: "ROAS 30d", accessor: (r) => (r.roas30 == null ? "" : Number(r.roas30.toFixed(2))) },
+    { key: "roas60", label: "ROAS 60d", accessor: (r) => (r.roas60 == null ? "" : Number(r.roas60.toFixed(2))) },
+  ];
   const productSort = useSortableRows(productGrouped, { key: "spend", type: "number", direction: "desc" });
   const parentSort = useSortableRows(parentGrouped, { key: "spend", type: "number", direction: "desc" });
   const itemTypeSort = useSortableRows(itemTypeGrouped, { key: "spend", type: "number", direction: "desc" });
@@ -2001,6 +2375,7 @@ const revenueByCategory = useMemo(() => {
   const tabs = [
     { id: "overview", label: "Overview", icon: DollarSign },
     { id: "advertising", label: "Advertising", icon: Megaphone },
+    { id: "campaignTrends", label: "Campaign Trends", icon: TrendingUp },
     { id: "targeting", label: "Targeting", icon: Search },
     { id: "searchTerms", label: "Search Terms", icon: ShieldMinus },
     { id: "inventory", label: "Inventory", icon: Warehouse },
@@ -2351,6 +2726,125 @@ const revenueByCategory = useMemo(() => {
             </div>
           )}
 
+          {activeTab === "campaignTrends" && (
+            <div className="space-y-6">
+              {/* Window selector + filters */}
+              <SectionCard
+                title="Campaign Trends"
+                subtitle="Compare campaign performance across the 7, 30, and 60-day windows. The 30-day window is the default; the 7 and 60-day windows are read from the *_7 and *_60 sheet tabs."
+              >
+                <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                  <div>
+                    <p className="mb-2 text-xs uppercase tracking-wider text-slate-500">
+                      Lookback window
+                    </p>
+                    <TogglePills
+                      value={campaignWindow}
+                      onChange={setCampaignWindow}
+                      options={["7", "30", "60"]}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3 md:min-w-[520px]">
+                    <FilterSelect
+                      label="Ad Type"
+                      value={adType}
+                      onChange={setAdType}
+                      options={adTypeOptions}
+                    />
+                    <FilterSelect
+                      label="Item Type"
+                      value={itemTypeFilter}
+                      onChange={setItemTypeFilter}
+                      options={itemTypeOptions}
+                    />
+                    <FilterSelect
+                      label="Brand"
+                      value={brandFilter}
+                      onChange={setBrandFilter}
+                      options={brandOptions}
+                    />
+                  </div>
+                </div>
+                <p className="mt-4 text-xs text-slate-500">
+                  Item Type filtering matches campaigns whose name contains the selected
+                  text — accuracy depends on your campaign naming convention.
+                </p>
+              </SectionCard>
+
+              {/* Recommended Actions cards (clickable to filter) */}
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+                {CAMPAIGN_CATEGORIES.map((cat) => {
+                  const count = campaignCategoryCounts[cat.id] ?? 0;
+                  const isActive = campaignActionFilter === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setCampaignActionFilter(cat.id)}
+                      className={cn(
+                        "rounded-2xl border p-4 text-left transition",
+                        isActive
+                          ? CATEGORY_TONE_CLASSES[cat.tone] + " ring-2 ring-cyan-400/40"
+                          : "border-slate-800 bg-slate-950 text-slate-200 hover:border-slate-700"
+                      )}
+                    >
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-xs uppercase tracking-wider text-slate-400">
+                          {cat.label}
+                        </span>
+                        <span className="text-2xl font-semibold text-white">
+                          {numberFmt(count)}
+                        </span>
+                      </div>
+                      {cat.action ? (
+                        <p className="mt-2 text-xs text-slate-400">{cat.action}</p>
+                      ) : (
+                        <p className="mt-2 text-xs text-slate-500">Show all categories</p>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Trends table */}
+              <SectionCard
+                title={`Campaigns — ${campaignWindow}-day window`}
+                subtitle={
+                  campaignActionFilter === "all"
+                    ? "All campaigns. Click a card above to filter by recommended action."
+                    : `Filtered to: ${
+                        (CAMPAIGN_CATEGORIES.find((c) => c.id === campaignActionFilter) || {}).label
+                      }`
+                }
+                right={
+                  <ExportButton
+                    filename={`campaign-trends-${campaignWindow}d.csv`}
+                    rows={trendsSort.sortedRows}
+                    columns={trendsExportColumns}
+                  />
+                }
+              >
+                {trendsSort.sortedRows.length === 0 ? (
+                  <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5 text-sm text-slate-400">
+                    No campaigns match the current filters. If the 7 or 60-day windows
+                    look empty, confirm the corresponding sheet tabs (
+                    <code>Sponsored Products Campaigns_7</code>,{" "}
+                    <code>Sponsored Brands Campaigns_60</code>, etc.) exist and contain
+                    campaign rows.
+                  </div>
+                ) : (
+                  <SortableTable
+                    rowKey={(row) => `${row.adType}||${row.campaignName}`}
+                    columns={trendsColumns}
+                    rows={trendsSort.sortedRows}
+                    sortConfig={trendsSort.sortConfig}
+                    onSort={trendsSort.handleSort}
+                  />
+                )}
+              </SectionCard>
+            </div>
+          )}
+
           {activeTab === "targeting" && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
@@ -2638,7 +3132,9 @@ const revenueByCategory = useMemo(() => {
                   right={
                     <ExportButton
                       filename="inventory-risk.csv"
-                      rows={inventorySort.sortedRows}
+                      rows={inventorySort.sortedRows.filter(
+                        (r) => !fbmOnlyAsins.has(String(r.asin || "").trim().toUpperCase())
+                      )}
                       columns={inventoryExportColumns}
                     />
                   }
@@ -2664,7 +3160,7 @@ const revenueByCategory = useMemo(() => {
                   right={
                     <ExportButton
                       filename="lowest-cover-asins.csv"
-                      rows={riskChartData}
+                      rows={riskChartExportRows}
                       columns={riskChartExportColumns}
                     />
                   }
