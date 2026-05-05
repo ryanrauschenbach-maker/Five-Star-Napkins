@@ -54,7 +54,7 @@ const TAB_NAMES = {
 
 const DAYS_TO_SHIP_TARGET = 60;
 const DAYS_URGENT = 14;
-const NEGATIVE_CLICK_THRESHOLD = 10;
+const NEGATIVE_CLICK_THRESHOLD = 12;
 
 function cn(...classes) {
   return classes.filter(Boolean).join(" ");
@@ -2527,7 +2527,7 @@ const revenueByCategory = useMemo(() => {
 
                 <SectionCard
                   title="Search Term Intelligence"
-                  subtitle="Shows existing negatives plus search terms with 10+ clicks and no conversions"
+                  subtitle="Shows existing negatives plus search terms with 12+ clicks and no conversions"
                   right={<TogglePills value={searchView} onChange={setSearchView} options={["Recommended", "Existing Negatives", "All Terms"]} />}
                 >
                   <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-4">
